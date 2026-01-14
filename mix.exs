@@ -9,6 +9,8 @@ defmodule Pentiment.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       docs: docs(),
+      description: "Beautiful, compiler-style diagnostic messages for Elixir",
+      package: package(),
       dialyzer: [
         plt_add_apps: [:mix, :ex_unit],
         plt_file: {:no_warn, "priv/plts/dialyzer.plt"}
@@ -19,6 +21,13 @@ defmodule Pentiment.MixProject do
   def application do
     [
       extra_applications: [:logger]
+    ]
+  end
+
+  defp package do
+    [
+      licenses: ["MIT"],
+      links: %{"GitHub" => "https://github.com/QuinnWilton/pentiment"}
     ]
   end
 
