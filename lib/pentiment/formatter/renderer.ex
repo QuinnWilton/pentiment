@@ -84,7 +84,12 @@ defmodule Pentiment.Formatter.Renderer do
 
     # Resolve source for this diagnostic.
     source = resolve_source(Diagnostic.source(diagnostic), sources)
-    labels = Diagnostic.labels(diagnostic)
+
+    # Get labels and resolve any search spans against the source.
+    labels =
+      diagnostic
+      |> Diagnostic.labels()
+      |> resolve_search_spans(source)
 
     # Calculate line number width for consistent padding.
     line_num_width = calculate_line_num_width(labels, context_lines)
@@ -139,6 +144,23 @@ defmodule Pentiment.Formatter.Renderer do
   end
 
   defp resolve_source(_source_name, _sources), do: nil
+
+  # ============================================================================
+  # Search Span Resolution
+  # ============================================================================
+
+  defp resolve_search_spans(labels, source) do
+    Enum.map(labels, fn label ->
+      case label.span do
+        %Span.Search{} = search ->
+          resolved = Span.Search.resolve(search, source)
+          %{label | span: resolved}
+
+        _ ->
+          label
+      end
+    end)
+  end
 
   # ============================================================================
   # Header Formatting

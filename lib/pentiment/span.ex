@@ -2,12 +2,14 @@ defmodule Pentiment.Span do
   @moduledoc """
   Span types for representing regions in source code.
 
-  Pentiment supports two span representations:
+  Pentiment supports three span representations:
 
   - `Pentiment.Span.Byte` - Byte offset spans, ideal for parsers that track byte positions
   - `Pentiment.Span.Position` - Line/column spans, ideal for Elixir macros and AST metadata
+  - `Pentiment.Span.Search` - Deferred spans that search for a pattern at format time
 
-  Both can be used interchangeably through the `Pentiment.Spannable` protocol.
+  The first two can be used interchangeably through the `Pentiment.Spannable` protocol.
+  Search spans are resolved to Position spans when the diagnostic is formatted.
 
   ## Examples
 
@@ -19,9 +21,12 @@ defmodule Pentiment.Span do
 
       # Single-point span (just a position)
       Pentiment.Span.position(5, 10)
+
+      # Deferred search span: find "error" on line 5
+      Pentiment.Span.search(line: 5, pattern: "error")
   """
 
-  @type t :: __MODULE__.Byte.t() | __MODULE__.Position.t()
+  @type t :: __MODULE__.Byte.t() | __MODULE__.Position.t() | __MODULE__.Search.t()
 
   # ============================================================================
   # Byte Offset Span
@@ -161,6 +166,149 @@ defmodule Pentiment.Span do
   end
 
   # ============================================================================
+  # Deferred Search Span
+  # ============================================================================
+
+  defmodule Search do
+    @moduledoc """
+    A deferred span that searches for a pattern at format time.
+
+    Search spans are resolved when the diagnostic is formatted, using the
+    source content to find the pattern and determine exact positions. This
+    is useful when span positions aren't known at diagnostic creation time,
+    such as in macros where keyword argument positions aren't in the AST.
+
+    ## Fields
+
+    - `:line` - The starting line number to search from (1-indexed, required)
+    - `:pattern` - The string pattern to find (required)
+    - `:after_column` - Only match patterns starting at or after this column on the first line (optional, defaults to 1)
+    - `:max_lines` - Maximum number of lines to search (optional, defaults to 1)
+
+    ## Resolution
+
+    At format time, the search span is resolved to a `Position` span:
+    - If the pattern is found, returns a span covering the match
+    - If not found, falls back to a point span at `{line, after_column}`
+
+    ## Examples
+
+        # Search for "hoost:" on line 3
+        Pentiment.Span.search(line: 3, pattern: "hoost:")
+
+        # Search after column 10 (skip earlier matches)
+        Pentiment.Span.search(line: 3, pattern: "host", after_column: 10)
+
+        # Search across multiple lines (for multi-line constructs)
+        Pentiment.Span.search(line: 3, pattern: "my_key:", max_lines: 5)
+    """
+
+    @type t :: %__MODULE__{
+            line: pos_integer(),
+            pattern: String.t(),
+            after_column: pos_integer(),
+            max_lines: pos_integer()
+          }
+
+    @enforce_keys [:line, :pattern]
+    defstruct [
+      :line,
+      :pattern,
+      after_column: 1,
+      max_lines: 1
+    ]
+
+    @doc """
+    Creates a new search span.
+
+    ## Options
+
+    - `:line` - The line number to start searching from (required)
+    - `:pattern` - The pattern to find (required)
+    - `:after_column` - Start searching at this column on the first line (default: 1)
+    - `:max_lines` - Maximum number of lines to search (default: 1)
+
+    ## Examples
+
+        iex> Pentiment.Span.Search.new(line: 3, pattern: "hoost:")
+        %Pentiment.Span.Search{line: 3, pattern: "hoost:", after_column: 1, max_lines: 1}
+
+        iex> Pentiment.Span.Search.new(line: 3, pattern: "host", after_column: 10)
+        %Pentiment.Span.Search{line: 3, pattern: "host", after_column: 10, max_lines: 1}
+
+        iex> Pentiment.Span.Search.new(line: 3, pattern: "key:", max_lines: 5)
+        %Pentiment.Span.Search{line: 3, pattern: "key:", after_column: 1, max_lines: 5}
+    """
+    @spec new(keyword()) :: t()
+    def new(opts) when is_list(opts) do
+      line = Keyword.fetch!(opts, :line)
+      pattern = Keyword.fetch!(opts, :pattern)
+      after_column = Keyword.get(opts, :after_column, 1)
+      max_lines = Keyword.get(opts, :max_lines, 1)
+
+      %__MODULE__{
+        line: line,
+        pattern: pattern,
+        after_column: after_column,
+        max_lines: max_lines
+      }
+    end
+
+    @doc """
+    Resolves a search span against source content, returning a Position span.
+
+    Searches for the pattern starting from the specified line, optionally
+    spanning multiple lines. Returns a Position span covering the match,
+    or a point span at `{line, after_column}` if not found.
+    """
+    @spec resolve(t(), Pentiment.Source.t() | nil) :: Pentiment.Span.Position.t()
+    def resolve(%__MODULE__{} = search, nil) do
+      # No source available, fall back to point span.
+      Pentiment.Span.Position.new(search.line, search.after_column)
+    end
+
+    def resolve(%__MODULE__{} = search, source) do
+      search_lines(search, source, search.line, search.max_lines)
+    end
+
+    defp search_lines(search, _source, _current_line, 0) do
+      # Exhausted all lines, fall back to point span.
+      Pentiment.Span.Position.new(search.line, search.after_column)
+    end
+
+    defp search_lines(search, source, current_line, remaining_lines) do
+      case Pentiment.Source.line(source, current_line) do
+        nil ->
+          # Line not found, fall back to point span.
+          Pentiment.Span.Position.new(search.line, search.after_column)
+
+        source_line ->
+          # On the first line, respect after_column; on subsequent lines, start from column 1.
+          search_start =
+            if current_line == search.line do
+              max(0, search.after_column - 1)
+            else
+              0
+            end
+
+          searchable = String.slice(source_line, search_start, String.length(source_line))
+
+          case :binary.match(searchable, search.pattern) do
+            {pos, len} ->
+              # Found - calculate actual column (1-indexed).
+              start_col = search_start + pos + 1
+              end_col = start_col + len
+              Pentiment.Span.Position.new(current_line, start_col, current_line, end_col)
+
+            :nomatch ->
+              # Not found on this line, try the next one.
+              search_lines(search, source, current_line + 1, remaining_lines - 1)
+          end
+      end
+    end
+  end
+
+  # ============================================================================
   # Convenience Constructors
   # ============================================================================
 
@@ -194,5 +342,38 @@ defmodule Pentiment.Span do
           Position.t()
   def position(start_line, start_column \\ 1, end_line \\ nil, end_column \\ nil) do
     Position.new(start_line, start_column, end_line, end_column)
+  end
+
+  @doc """
+  Creates a deferred search span.
+
+  Search spans are resolved at format time by searching for the pattern in
+  the source content. This is useful when exact positions aren't available
+  at diagnostic creation time, such as in macros.
+
+  ## Options
+
+  - `:line` - The starting line number to search from (required)
+  - `:pattern` - The string pattern to find (required)
+  - `:after_column` - Only match patterns starting at or after this column on the first line (default: 1)
+  - `:max_lines` - Maximum number of lines to search (default: 1)
+
+  ## Examples
+
+      # Search for "hoost:" on line 3
+      iex> Pentiment.Span.search(line: 3, pattern: "hoost:")
+      %Pentiment.Span.Search{line: 3, pattern: "hoost:", after_column: 1, max_lines: 1}
+
+      # Search after column 10 to skip earlier matches
+      iex> Pentiment.Span.search(line: 3, pattern: "host", after_column: 10)
+      %Pentiment.Span.Search{line: 3, pattern: "host", after_column: 10, max_lines: 1}
+
+      # Search across multiple lines (for multi-line constructs)
+      iex> Pentiment.Span.search(line: 3, pattern: "key:", max_lines: 5)
+      %Pentiment.Span.Search{line: 3, pattern: "key:", after_column: 1, max_lines: 5}
+  """
+  @spec search(keyword()) :: Search.t()
+  def search(opts) when is_list(opts) do
+    Search.new(opts)
   end
 end
