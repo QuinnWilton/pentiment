@@ -1,52 +1,57 @@
 # Pentiment
 
-Beautiful, informative compiler-style error messages for Elixir.
-
-Pentiment provides rich diagnostic formatting with highlighted source spans,
-helpful suggestions, and clear error context. It's designed for compile-time
-macro errors, DSL validation, parser error reporting, and configuration file
-validation.
-
-## Installation
-
-Add `pentiment` to your list of dependencies in `mix.exs`:
-
-```elixir
-def deps do
-  [
-    {:pentiment, "~> 0.1.0"}
-  ]
-end
-```
-
-## Example Output
+Beautiful, compiler-style diagnostic messages for Elixir.
 
 ![State machine error example](images/state_machine.png)
 
-## Usage
+## Features
+
+- **Rich source context** — Highlighted code spans with line numbers and visual pointers
+- **Multiple labels** — Primary and secondary annotations to show related code locations
+- **Helpful metadata** — Error codes, notes, and actionable suggestions
+- **Flexible spans** — Line/column positions, byte offsets, or deferred pattern search
+- **Elixir integration** — Extract spans directly from AST metadata
+
+## Installation
+
+```elixir
+def deps do
+  [{:pentiment, "~> 0.1.0"}]
+end
+```
+
+## Quick Example
 
 ```elixir
 alias Pentiment.{Report, Label, Span, Source}
 
-# Create a diagnostic report
 report =
-  Report.error("Transition references undefined state `gren`")
-  |> Report.with_code("SM001")
-  |> Report.with_source("lib/traffic_light.ex")
-  |> Report.with_label(Label.primary(Span.position(11, 38), "undefined state"))
-  |> Report.with_label(Label.secondary(Span.position(5, 3), "did you mean this state?"))
-  |> Report.with_help("change `to: :gren` to `to: :green`")
-  |> Report.with_note("defined states are: green, yellow, red")
+  Report.error("Undefined variable")
+  |> Report.with_code("E001")
+  |> Report.with_source("lib/app.ex")
+  |> Report.with_label(Label.primary(Span.position(10, 5), "not found in scope"))
+  |> Report.with_help("did you mean `user`?")
 
-# Load the source file
-source = Source.from_file("lib/traffic_light.ex")
-
-# Format and display
+source = Source.from_file("lib/app.ex")
 IO.puts(Pentiment.format(report, source))
 ```
 
+## Use Cases
+
+Pentiment is designed for:
+
+- **Compile-time macro errors** — Validate DSL usage with precise source locations
+- **Parser error reporting** — Convert parse failures into helpful diagnostics
+- **Configuration validation** — Catch invalid keys and suggest corrections
+- **Custom linters** — Build tools that report issues with rich context
+
 ## Documentation
 
-Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
-and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
-be found at <https://hexdocs.pm/pentiment>.
+- [Examples Overview](guides/examples/overview.md) — Integration patterns and quick start
+- [Config Validation](guides/examples/config_validation.md) — Compile-time config checking
+- [State Machine DSL](guides/examples/state_machine.md) — Multi-span errors
+- [Guard Restriction](guides/examples/guard_restriction.md) — AST walking patterns
+- [Parser Errors](guides/examples/parser_errors.md) — NimbleParsec integration
+- [YAML Validation](guides/examples/yaml_validation.md) — Semantic file validation
+
+Full API documentation available on [HexDocs](https://hexdocs.pm/pentiment).

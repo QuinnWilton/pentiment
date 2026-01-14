@@ -102,20 +102,9 @@ source = Pentiment.Source.from_string("input.txt", content)
 formatted = Pentiment.format(report, source, colors: false)
 ```
 
-## Error Output Example
+## Example Output
 
-```
-error[E001]: Type mismatch
-   ╭─[lib/my_app.ex:15:10]
-   │
-14 │   add = fn x :: integer, y :: integer ->
-15 │     x + y + 1.5
-   •             ────┬────
-   •                 ╰── expected `integer`, found `float`
-   │
-   ╰─────
-      help: Use `trunc/1` to convert
-```
+![State machine error example](images/state_machine.png)
 
 ## Running the Examples
 
