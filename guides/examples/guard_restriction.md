@@ -13,7 +13,7 @@ You're building a library that restricts certain guards and want to:
 
 ## Example Error Output
 
-![Guard restriction error](../images/guard_restriction.png)
+![Guard restriction error](https://raw.githubusercontent.com/QuinnWilton/pentiment/main/images/guard_restriction.png)
 
 ## Usage
 

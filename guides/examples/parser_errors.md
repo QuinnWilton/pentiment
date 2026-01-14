@@ -14,7 +14,7 @@ You're building a parser and want to:
 
 ## Example Error Output
 
-![Parser error](../images/parser_errors.png)
+![Parser error](https://raw.githubusercontent.com/QuinnWilton/pentiment/main/images/parser_errors.png)
 
 ## Usage
 

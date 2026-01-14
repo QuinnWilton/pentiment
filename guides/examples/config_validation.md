@@ -13,7 +13,7 @@ You're building a library that accepts configuration options, and you want to:
 
 ## Example Error Output
 
-![Config validation error](../images/config_validation.png)
+![Config validation error](https://raw.githubusercontent.com/QuinnWilton/pentiment/main/images/config_validation.png)
 
 ## Usage
 

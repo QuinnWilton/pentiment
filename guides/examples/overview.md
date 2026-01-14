@@ -104,7 +104,7 @@ formatted = Pentiment.format(report, source, colors: false)
 
 ## Example Output
 
-![State machine error example](../images/state_machine.png)
+![State machine error example](https://raw.githubusercontent.com/QuinnWilton/pentiment/main/images/state_machine.png)
 
 ## Running the Examples
 
