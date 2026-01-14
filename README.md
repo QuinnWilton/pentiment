@@ -1,5 +1,9 @@
 # Pentiment
 
+[![CI](https://github.com/QuinnWilton/pentiment/actions/workflows/ci.yml/badge.svg)](https://github.com/QuinnWilton/pentiment/actions/workflows/ci.yml)
+[![Hex.pm](https://img.shields.io/hexpm/v/pentiment.svg)](https://hex.pm/packages/pentiment)
+[![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/pentiment)
+
 Beautiful, compiler-style diagnostic messages for Elixir.
 
 ![State machine error example](images/state_machine.png)
