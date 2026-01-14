@@ -13,7 +13,7 @@ You're building a state machine DSL and want to:
 
 ## Example Error Output
 
-![State machine error](images/state_machine.png)
+![State machine error](../images/state_machine.png)
 
 ## Usage
 

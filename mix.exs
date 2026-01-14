@@ -36,7 +36,7 @@ defmodule Pentiment.MixProject do
   defp docs do
     [
       main: "readme",
-      assets: %{"guides/images" => "images"},
+      assets: %{"images" => "images"},
       extras: [
         "README.md",
         "guides/examples/overview.md",

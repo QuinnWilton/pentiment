@@ -14,7 +14,7 @@ You're validating configuration files and want to:
 
 ## Example Error Output
 
-![YAML validation error](images/yaml_validation.png)
+![YAML validation error](../images/yaml_validation.png)
 
 ## Usage
 
