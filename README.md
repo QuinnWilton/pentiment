@@ -19,58 +19,30 @@ def deps do
 end
 ```
 
+## Example Output
+
+![State machine error example](images/state_machine.png)
+
 ## Usage
 
 ```elixir
 alias Pentiment.{Report, Label, Span, Source}
 
-# Create a diagnostic
+# Create a diagnostic report
 report =
-  Report.error("Type mismatch")
-  |> Report.with_code("E001")
-  |> Report.with_source("lib/my_app.ex")
-  |> Report.with_label(Label.primary(Span.position(15, 10), "expected `integer`, found `float`"))
-  |> Report.with_help("use `trunc/1` to convert")
+  Report.error("Transition references undefined state `gren`")
+  |> Report.with_code("SM001")
+  |> Report.with_source("lib/traffic_light.ex")
+  |> Report.with_label(Label.primary(Span.position(11, 38), "undefined state"))
+  |> Report.with_label(Label.secondary(Span.position(5, 3), "did you mean this state?"))
+  |> Report.with_help("change `to: :gren` to `to: :green`")
+  |> Report.with_note("defined states are: green, yellow, red")
 
-# Create a source
-source = Source.from_string("lib/my_app.ex", """
-defmodule MyApp do
-  def add(x, y) do
-    x + y
-  end
-
-  def run do
-    add(1, 2)
-  end
-
-  def example do
-    x = 10
-    y = 20
-    z = 30
-    result = x + y + 1.5
-    result + z
-  end
-end
-""")
+# Load the source file
+source = Source.from_file("lib/traffic_light.ex")
 
 # Format and display
 IO.puts(Pentiment.format(report, source))
-```
-
-Output:
-
-```
-error[E001]: Type mismatch
-   ╭─[lib/my_app.ex:15:10]
-   │
-13 │     z = 30
-14 │     result = x + y + 1.5
-   •                      ─┬─
-   •                       ╰── expected `integer`, found `float`
-15 │     result + z
-   │
-   ╰─────
-      help: use `trunc/1` to convert
 ```
 
 ## Documentation
