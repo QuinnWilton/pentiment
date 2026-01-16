@@ -350,16 +350,258 @@ defmodule Pentiment.Formatter.Renderer do
         "#{line_str} #{@box.vertical} #{truncated_line}"
       end
 
-    pointer_lines =
-      labels
-      |> Enum.flat_map(fn label ->
-        format_label_pointer(label, source_line, padding, use_colors)
-      end)
+    # For single label, use simple rendering (no collision possible).
+    if length(labels) == 1 do
+      pointer_lines =
+        labels
+        |> Enum.flat_map(fn label ->
+          format_single_label_pointer(label, source_line, padding, use_colors)
+        end)
 
-    [source | pointer_lines]
+      [source | pointer_lines]
+    else
+      # Multiple labels: use collision-aware rendering.
+      pointer_lines = format_multi_label_pointers(labels, source_line, padding, use_colors)
+      [source | pointer_lines]
+    end
   end
 
-  defp format_label_pointer(label, source_line, padding, use_colors) do
+  # Renders multiple labels with collision avoidance.
+  # Labels are sorted right-to-left, with rightmost getting the closest position
+  # to its underline. Vertical connectors extend down for labels further left.
+  defp format_multi_label_pointers(labels, source_line, padding, use_colors) do
+    # Phase 1: Compute geometry for each label.
+    geometries =
+      Enum.map(labels, fn label ->
+        compute_label_geometry(label, source_line, use_colors)
+      end)
+
+    # Phase 2: Sort right-to-left by tee column (rightmost first).
+    sorted = Enum.sort_by(geometries, fn g -> -g.tee_col end)
+
+    # Phase 3: Group into underline rows based on overlap.
+    underline_groups = group_underlines_by_overlap(sorted)
+
+    # Phase 4: Assign message row indices.
+    # Rightmost label (first in sorted) gets message row 0, next gets 1, etc.
+    geometries_with_rows = Enum.with_index(sorted)
+
+    # Phase 5: Render underline rows.
+    # For underline rows after the first, we need connectors for labels whose
+    # underlines are on earlier rows but whose messages come later.
+    underline_lines =
+      underline_groups
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {group, underline_row_idx} ->
+        # Connectors needed: labels whose underlines are on earlier rows.
+        # These labels' tees need vertical connectors through this row.
+        connector_cols =
+          underline_groups
+          |> Enum.take(underline_row_idx)
+          |> List.flatten()
+          |> Enum.map(fn g -> g.tee_col end)
+          |> MapSet.new()
+
+        render_underline_row(group, connector_cols, padding, use_colors)
+      end)
+
+    # Phase 6: Render message rows with connectors.
+    message_lines =
+      geometries_with_rows
+      |> Enum.flat_map(fn {geom, row_idx} ->
+        # Connector columns: tee columns of labels that haven't rendered yet.
+        connector_cols =
+          geometries_with_rows
+          |> Enum.filter(fn {_, idx} -> idx > row_idx end)
+          |> Enum.map(fn {g, _} -> g.tee_col end)
+          |> MapSet.new()
+
+        render_message_row(geom, connector_cols, padding, use_colors)
+      end)
+
+    underline_lines ++ message_lines
+  end
+
+  # Computes geometry for a single label.
+  defp compute_label_geometry(label, source_line, use_colors) do
+    span = Label.resolved_span(label)
+    start_col = span.start_column || 1
+    width = estimate_span_width(span, source_line, start_col)
+    end_col = start_col + width
+    tee_col = start_col + div(width - 1, 2)
+    color = if use_colors, do: priority_color(label.priority), else: ""
+
+    %{
+      start_col: start_col,
+      end_col: end_col,
+      width: width,
+      tee_col: tee_col,
+      message: label.message || "",
+      priority: label.priority,
+      color: color
+    }
+  end
+
+  # Groups geometries into underline rows based on overlap.
+  # Returns list of lists, where each inner list contains non-overlapping geometries.
+  defp group_underlines_by_overlap(sorted_geometries) do
+    Enum.reduce(sorted_geometries, [], fn geom, groups ->
+      # Try to find an existing group where this geometry doesn't overlap.
+      case find_non_overlapping_group(groups, geom) do
+        {:ok, group_idx} ->
+          List.update_at(groups, group_idx, fn group -> group ++ [geom] end)
+
+        :none ->
+          # Create new group for this geometry.
+          groups ++ [[geom]]
+      end
+    end)
+  end
+
+  defp find_non_overlapping_group(groups, geom) do
+    groups
+    |> Enum.with_index()
+    |> Enum.find_value(:none, fn {group, idx} ->
+      if Enum.all?(group, fn g -> not underlines_overlap?(g, geom) end) do
+        {:ok, idx}
+      else
+        nil
+      end
+    end)
+  end
+
+  # Two underlines overlap if their column ranges intersect.
+  defp underlines_overlap?(geom1, geom2) do
+    geom1.start_col < geom2.end_col and geom2.start_col < geom1.end_col
+  end
+
+  # Renders a single underline row containing multiple non-overlapping geometries.
+  # Also renders vertical connectors for labels from earlier underline rows.
+  defp render_underline_row(geometries, connector_cols, padding, use_colors) do
+    # Find the rightmost column we need to render (consider both underlines and connectors).
+    max_col_from_geoms = Enum.max_by(geometries, fn g -> g.end_col end).end_col
+
+    max_col_from_connectors =
+      if MapSet.size(connector_cols) > 0 do
+        Enum.max(connector_cols)
+      else
+        0
+      end
+
+    max_col = max(max_col_from_geoms, max_col_from_connectors)
+
+    # Build the underline character by character.
+    chars =
+      1..max_col
+      |> Enum.map(fn col ->
+        # Check if this column is a tee position.
+        tee_geom = Enum.find(geometries, fn g -> g.tee_col == col end)
+
+        # Check if this column is part of any underline.
+        underline_geom =
+          Enum.find(geometries, fn g ->
+            col >= g.start_col and col < g.end_col
+          end)
+
+        # Check if this column needs a vertical connector.
+        is_connector = MapSet.member?(connector_cols, col)
+
+        cond do
+          tee_geom != nil ->
+            # Tee position: use color of that label.
+            if use_colors do
+              "#{tee_geom.color}#{@box.tee_down}#{@colors.reset}"
+            else
+              @box.tee_down
+            end
+
+          underline_geom != nil ->
+            # Part of underline: use color of that label.
+            if use_colors do
+              "#{underline_geom.color}#{@box.horizontal}#{@colors.reset}"
+            else
+              @box.horizontal
+            end
+
+          is_connector ->
+            # Vertical connector for label from earlier row.
+            if use_colors do
+              "#{@colors.dim}#{@box.vertical}#{@colors.reset}"
+            else
+              @box.vertical
+            end
+
+          true ->
+            " "
+        end
+      end)
+      |> Enum.join()
+
+    line =
+      if use_colors do
+        "#{padding} #{@colors.dim}#{@box.dot}#{@colors.reset} #{chars}"
+      else
+        "#{padding} #{@box.dot} #{chars}"
+      end
+
+    [line]
+  end
+
+  # Renders a message row with vertical connectors for labels not yet rendered.
+  defp render_message_row(geom, connector_cols, padding, use_colors) do
+    # The message appears after the branch symbol.
+    # Format: spaces... connector... spaces... ╰── message
+
+    # Build character by character up to the tee column.
+    max_col = geom.tee_col
+
+    chars =
+      1..max_col
+      |> Enum.map(fn col ->
+        cond do
+          col == geom.tee_col ->
+            # This label's branch point.
+            if use_colors do
+              "#{geom.color}#{@box.bottom_left}#{@colors.reset}"
+            else
+              @box.bottom_left
+            end
+
+          MapSet.member?(connector_cols, col) ->
+            # Vertical connector for a label further left.
+            # Find the geometry for this connector to get its color.
+            if use_colors do
+              "#{@colors.dim}#{@box.vertical}#{@colors.reset}"
+            else
+              @box.vertical
+            end
+
+          true ->
+            " "
+        end
+      end)
+      |> Enum.join()
+
+    # Add the horizontal line and message.
+    branch_suffix =
+      if use_colors do
+        "#{geom.color}#{@box.horizontal}#{@box.horizontal} #{geom.message}#{@colors.reset}"
+      else
+        "#{@box.horizontal}#{@box.horizontal} #{geom.message}"
+      end
+
+    line =
+      if use_colors do
+        "#{padding} #{@colors.dim}#{@box.dot}#{@colors.reset} #{chars}#{branch_suffix}"
+      else
+        "#{padding} #{@box.dot} #{chars}#{branch_suffix}"
+      end
+
+    [line]
+  end
+
+  # Single label pointer rendering (original simple logic).
+  defp format_single_label_pointer(label, source_line, padding, use_colors) do
     span = Label.resolved_span(label)
     message = label.message
     priority = label.priority
