@@ -293,6 +293,77 @@ defmodule PentimentTest do
 
       assert result =~ "found it"
     end
+
+    test "resolves byte spans on single line" do
+      report =
+        Report.error("Byte span error")
+        |> Report.with_source("test.ex")
+        |> Report.with_label(Label.primary(Span.byte(6, 5), "this is 'world'"))
+
+      source = Source.from_string("test.ex", "hello world")
+      result = Pentiment.format(report, source, colors: false)
+
+      assert result =~ "error: Byte span error"
+      assert result =~ "test.ex:1:7"
+      assert result =~ "this is 'world'"
+      assert result =~ "hello world"
+    end
+
+    test "resolves byte spans across multiple lines" do
+      report =
+        Report.error("Multi-line byte span")
+        |> Report.with_source("test.ex")
+        |> Report.with_label(Label.primary(Span.byte(6, 5), "spans to second line"))
+
+      source = Source.from_string("test.ex", "hello\nworld\nfoo")
+      result = Pentiment.format(report, source, colors: false)
+
+      assert result =~ "error: Multi-line byte span"
+      assert result =~ "test.ex:2:1"
+      assert result =~ "spans to second line"
+    end
+
+    test "handles byte span with nil source (fallback)" do
+      report =
+        Report.error("No source")
+        |> Report.with_source("missing.ex")
+        |> Report.with_label(Label.primary(Span.byte(10, 5), "label"))
+
+      # Source name doesn't match, so nil is used.
+      source = Source.from_string("other.ex", "content")
+      result = Pentiment.format(report, source, colors: false)
+
+      assert result =~ "error: No source"
+      # Should fall back to line 1, column 1.
+      assert result =~ "line 1:1"
+    end
+
+    test "handles mixed Position and Byte spans in same diagnostic" do
+      report =
+        Report.error("Mixed spans")
+        |> Report.with_source("test.ex")
+        |> Report.with_label(Label.primary(Span.position(1, 1, 1, 5), "position span"))
+        |> Report.with_label(Label.secondary(Span.byte(6, 5), "byte span"))
+
+      source = Source.from_string("test.ex", "hello world foo bar")
+      result = Pentiment.format(report, source, colors: false)
+
+      assert result =~ "position span"
+      assert result =~ "byte span"
+    end
+
+    test "handles byte span with invalid offset (fallback)" do
+      report =
+        Report.error("Invalid offset")
+        |> Report.with_source("test.ex")
+        |> Report.with_label(Label.primary(Span.byte(100, 5), "unreachable"))
+
+      source = Source.from_string("test.ex", "hello")
+      result = Pentiment.format(report, source, colors: false)
+
+      # Should fall back gracefully.
+      assert result =~ "error: Invalid offset"
+    end
   end
 
   describe "format_compact/1 edge cases" do

@@ -228,6 +228,90 @@ defmodule Pentiment.SourceTest do
     end
   end
 
+  describe "byte_to_position/2" do
+    test "returns position for offset at start of content" do
+      source = Source.from_string("test", "hello world")
+
+      assert Source.byte_to_position(source, 0) == {1, 1}
+    end
+
+    test "returns position for offset within first line" do
+      source = Source.from_string("test", "hello world")
+
+      assert Source.byte_to_position(source, 6) == {1, 7}
+    end
+
+    test "returns position at start of second line" do
+      source = Source.from_string("test", "hello\nworld")
+
+      # Byte 5 is the newline, byte 6 is 'w' on line 2.
+      assert Source.byte_to_position(source, 6) == {2, 1}
+    end
+
+    test "returns position for multi-line content" do
+      source = Source.from_string("test", "line1\nline2\nline3")
+
+      assert Source.byte_to_position(source, 0) == {1, 1}
+      assert Source.byte_to_position(source, 5) == {1, 6}
+      assert Source.byte_to_position(source, 6) == {2, 1}
+      assert Source.byte_to_position(source, 12) == {3, 1}
+    end
+
+    test "returns nil for offset beyond content" do
+      source = Source.from_string("test", "hello")
+
+      assert Source.byte_to_position(source, 100) == nil
+    end
+
+    test "returns nil for named source without content" do
+      source = Source.named("test.ex")
+
+      assert Source.byte_to_position(source, 0) == nil
+    end
+
+    test "returns nil for negative offset" do
+      source = Source.from_string("test", "hello")
+
+      assert Source.byte_to_position(source, -1) == nil
+    end
+
+    test "handles empty content" do
+      source = Source.from_string("test", "")
+
+      assert Source.byte_to_position(source, 0) == {1, 1}
+      assert Source.byte_to_position(source, 1) == nil
+    end
+
+    test "handles offset at exact end of content" do
+      source = Source.from_string("test", "hello")
+
+      # Offset 5 is just past the last character, but still valid for end positions.
+      assert Source.byte_to_position(source, 5) == {1, 6}
+    end
+
+    test "handles multi-byte UTF-8 characters" do
+      # "héllo" where é is 2 bytes (UTF-8).
+      source = Source.from_string("test", "héllo")
+
+      assert Source.byte_to_position(source, 0) == {1, 1}
+      # 'h' is at byte 0, 'é' spans bytes 1-2.
+      assert Source.byte_to_position(source, 1) == {1, 2}
+      # Byte 3 is 'l'.
+      assert Source.byte_to_position(source, 3) == {1, 3}
+    end
+
+    test "handles newlines correctly across multiple lines" do
+      source = Source.from_string("test", "a\nb\nc")
+
+      # a is byte 0, \n is byte 1, b is byte 2, \n is byte 3, c is byte 4.
+      assert Source.byte_to_position(source, 0) == {1, 1}
+      assert Source.byte_to_position(source, 1) == {1, 2}
+      assert Source.byte_to_position(source, 2) == {2, 1}
+      assert Source.byte_to_position(source, 3) == {2, 2}
+      assert Source.byte_to_position(source, 4) == {3, 1}
+    end
+  end
+
   describe "property tests" do
     property "line_count equals length of lines list" do
       check all(content <- string(:printable)) do
@@ -282,6 +366,37 @@ defmodule Pentiment.SourceTest do
           end
 
         assert Source.has_content?(source) == has_content?
+      end
+    end
+
+    property "byte_to_position returns nil for offset beyond content" do
+      check all(content <- string(:printable, min_length: 1)) do
+        source = Source.from_string("test", content)
+        beyond_offset = byte_size(content) + 1
+
+        assert Source.byte_to_position(source, beyond_offset) == nil
+      end
+    end
+
+    property "byte_to_position at offset 0 returns {1, 1} for non-empty content" do
+      check all(content <- string(:printable, min_length: 1)) do
+        source = Source.from_string("test", content)
+
+        assert Source.byte_to_position(source, 0) == {1, 1}
+      end
+    end
+
+    property "byte_to_position returns valid line and column" do
+      check all(
+              content <- string(:printable, min_length: 1),
+              offset <- integer(0..(byte_size(content) - 1))
+            ) do
+        source = Source.from_string("test", content)
+        result = Source.byte_to_position(source, offset)
+
+        assert {line, col} = result
+        assert line >= 1
+        assert col >= 1
       end
     end
   end

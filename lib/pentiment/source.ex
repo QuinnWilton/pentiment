@@ -196,4 +196,65 @@ defmodule Pentiment.Source do
   @spec line_count(t()) :: non_neg_integer() | nil
   def line_count(%__MODULE__{lines: nil}), do: nil
   def line_count(%__MODULE__{lines: lines}), do: length(lines)
+
+  @doc """
+  Converts a byte offset to a line and column position.
+
+  Returns `{line, column}` where both are 1-indexed, or `nil` if the offset
+  is out of bounds or no content is available.
+
+  ## Examples
+
+      iex> source = Pentiment.Source.from_string("test", "hello\\nworld")
+      iex> Pentiment.Source.byte_to_position(source, 0)
+      {1, 1}
+
+      iex> source = Pentiment.Source.from_string("test", "hello\\nworld")
+      iex> Pentiment.Source.byte_to_position(source, 6)
+      {2, 1}
+
+      iex> source = Pentiment.Source.from_string("test", "hello\\nworld")
+      iex> Pentiment.Source.byte_to_position(source, 100)
+      nil
+  """
+  @spec byte_to_position(t(), non_neg_integer()) :: {pos_integer(), pos_integer()} | nil
+  def byte_to_position(%__MODULE__{content: nil}, _offset), do: nil
+
+  def byte_to_position(%__MODULE__{}, offset) when not is_integer(offset) or offset < 0, do: nil
+
+  def byte_to_position(%__MODULE__{content: content}, offset) do
+    byte_size = byte_size(content)
+
+    if offset > byte_size do
+      nil
+    else
+      compute_position(content, offset, 1, 1)
+    end
+  end
+
+  # Walks through content byte-by-byte, tracking line and column.
+  defp compute_position(_content, 0, line, col), do: {line, col}
+
+  defp compute_position(<<>>, _offset, _line, _col), do: nil
+
+  defp compute_position(<<?\n, rest::binary>>, offset, line, _col) do
+    compute_position(rest, offset - 1, line + 1, 1)
+  end
+
+  defp compute_position(<<char::utf8, rest::binary>>, offset, line, col) do
+    # For multi-byte UTF-8 characters, we need to count bytes not codepoints.
+    char_bytes = byte_size(<<char::utf8>>)
+
+    if offset < char_bytes do
+      # Offset is in the middle of a multi-byte character; return current position.
+      {line, col}
+    else
+      compute_position(rest, offset - char_bytes, line, col + 1)
+    end
+  end
+
+  defp compute_position(<<_byte, rest::binary>>, offset, line, col) do
+    # Fallback for invalid UTF-8 sequences; treat as single byte.
+    compute_position(rest, offset - 1, line, col + 1)
+  end
 end

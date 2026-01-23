@@ -37,6 +37,109 @@ defmodule Pentiment.SpanTest do
     end
   end
 
+  describe "Byte.resolve/2" do
+    test "returns point span when source is nil" do
+      byte_span = Byte.new(10, 5)
+
+      result = Byte.resolve(byte_span, nil)
+
+      assert %Position{start_line: 1, start_column: 1, end_line: nil, end_column: nil} = result
+    end
+
+    test "converts single-line byte span to position span" do
+      source = Source.from_string("test", "hello world")
+      # "world" starts at byte 6, length 5.
+      byte_span = Byte.new(6, 5)
+
+      result = Byte.resolve(byte_span, source)
+
+      assert %Position{
+               start_line: 1,
+               start_column: 7,
+               end_line: 1,
+               end_column: 12
+             } = result
+    end
+
+    test "converts multi-line byte span to position span" do
+      source = Source.from_string("test", "hello\nworld")
+      # Span from 'h' to 'w': bytes 0-6 (7 bytes).
+      byte_span = Byte.new(0, 7)
+
+      result = Byte.resolve(byte_span, source)
+
+      assert %Position{
+               start_line: 1,
+               start_column: 1,
+               end_line: 2,
+               end_column: 2
+             } = result
+    end
+
+    test "handles span starting at second line" do
+      source = Source.from_string("test", "hello\nworld")
+      # "world" starts at byte 6 (after newline), length 5.
+      byte_span = Byte.new(6, 5)
+
+      result = Byte.resolve(byte_span, source)
+
+      assert %Position{
+               start_line: 2,
+               start_column: 1,
+               end_line: 2,
+               end_column: 6
+             } = result
+    end
+
+    test "falls back to point span for invalid start offset" do
+      source = Source.from_string("test", "hello")
+      byte_span = Byte.new(100, 5)
+
+      result = Byte.resolve(byte_span, source)
+
+      assert %Position{start_line: 1, start_column: 1, end_line: nil, end_column: nil} = result
+    end
+
+    test "falls back to point span when end offset is beyond content" do
+      source = Source.from_string("test", "hello")
+      # Start at byte 3, length 10 (way beyond content).
+      byte_span = Byte.new(3, 10)
+
+      result = Byte.resolve(byte_span, source)
+
+      # Should return point span at the start position.
+      assert %Position{start_line: 1, start_column: 4, end_line: nil, end_column: nil} = result
+    end
+
+    test "handles byte span at start of content" do
+      source = Source.from_string("test", "hello world")
+      byte_span = Byte.new(0, 5)
+
+      result = Byte.resolve(byte_span, source)
+
+      assert %Position{
+               start_line: 1,
+               start_column: 1,
+               end_line: 1,
+               end_column: 6
+             } = result
+    end
+
+    test "handles single byte span" do
+      source = Source.from_string("test", "hello")
+      byte_span = Byte.new(2, 1)
+
+      result = Byte.resolve(byte_span, source)
+
+      assert %Position{
+               start_line: 1,
+               start_column: 3,
+               end_line: 1,
+               end_column: 4
+             } = result
+    end
+  end
+
   describe "Span.Position" do
     test "creates position span with full range" do
       span = Position.new(5, 10, 5, 20)
@@ -327,6 +430,57 @@ defmodule Pentiment.SpanTest do
 
         assert span.start == start
         assert span.length == length
+      end
+    end
+  end
+
+  describe "property tests for Byte.resolve" do
+    property "resolve always returns a Position span" do
+      check all(
+              start <- non_negative_integer(),
+              length <- positive_integer(),
+              content <- string(:alphanumeric)
+            ) do
+        source = Source.from_string("test", content)
+        byte_span = Byte.new(start, length)
+
+        result = Byte.resolve(byte_span, source)
+
+        assert %Position{} = result
+        assert result.start_line >= 1
+        assert result.start_column >= 1
+      end
+    end
+
+    property "resolve with nil source always returns point at {1, 1}" do
+      check all(
+              start <- non_negative_integer(),
+              length <- positive_integer()
+            ) do
+        byte_span = Byte.new(start, length)
+
+        result = Byte.resolve(byte_span, nil)
+
+        assert %Position{start_line: 1, start_column: 1} = result
+        assert Position.point?(result)
+      end
+    end
+
+    property "resolve returns non-point span for valid offsets within content" do
+      check all(
+              content <- string(:alphanumeric, min_length: 5),
+              start <- integer(0..min(byte_size(content) - 2, 10)),
+              length <- integer(1..min(byte_size(content) - start - 1, 3))
+            ) do
+        source = Source.from_string("test", content)
+        byte_span = Byte.new(start, length)
+
+        result = Byte.resolve(byte_span, source)
+
+        assert %Position{} = result
+        # Should have end position for valid ranges.
+        assert result.end_line != nil
+        assert result.end_column != nil
       end
     end
   end

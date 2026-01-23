@@ -66,6 +66,47 @@ defmodule Pentiment.Span do
         when is_integer(start) and start >= 0 and is_integer(length) and length >= 1 do
       %__MODULE__{start: start, length: length}
     end
+
+    @doc """
+    Resolves a byte span against source content, returning a Position span.
+
+    Converts byte offsets to line/column positions using the source content.
+    Returns a Position span covering the byte range, or falls back to a point
+    span at line 1, column 1 if the source is nil or offsets are invalid.
+
+    ## Examples
+
+        iex> source = Pentiment.Source.from_string("test", "hello world")
+        iex> byte_span = Pentiment.Span.Byte.new(6, 5)
+        iex> Pentiment.Span.Byte.resolve(byte_span, source)
+        %Pentiment.Span.Position{start_line: 1, start_column: 7, end_line: 1, end_column: 12}
+    """
+    @spec resolve(t(), Pentiment.Source.t() | nil) :: Pentiment.Span.Position.t()
+    def resolve(%__MODULE__{}, nil) do
+      # No source available, fall back to point span.
+      Pentiment.Span.Position.new(1, 1)
+    end
+
+    def resolve(%__MODULE__{start: start, length: length}, source) do
+      case Pentiment.Source.byte_to_position(source, start) do
+        nil ->
+          # Invalid start offset, fall back to point span.
+          Pentiment.Span.Position.new(1, 1)
+
+        {start_line, start_col} ->
+          # Calculate end position (exclusive, so start + length).
+          end_offset = start + length
+
+          case Pentiment.Source.byte_to_position(source, end_offset) do
+            nil ->
+              # End offset is beyond content; use start as a point span.
+              Pentiment.Span.Position.new(start_line, start_col)
+
+            {end_line, end_col} ->
+              Pentiment.Span.Position.new(start_line, start_col, end_line, end_col)
+          end
+      end
+    end
   end
 
   # ============================================================================
