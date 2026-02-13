@@ -11,6 +11,7 @@ defmodule Pentiment.MixProject do
       docs: docs(),
       description: "Beautiful, compiler-style diagnostic messages for Elixir",
       package: package(),
+      test_ignore_filters: [~r"/support/"],
       dialyzer: [
         plt_add_apps: [:mix, :ex_unit],
         plt_file: {:no_warn, "priv/plts/dialyzer.plt"}
