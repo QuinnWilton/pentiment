@@ -77,7 +77,7 @@ defmodule Pentiment.Examples.ConfigValidation do
           |> Pentiment.Report.with_note("valid keys are: #{Enum.join(@valid_keys, ", ")}")
 
         source = Pentiment.Elixir.source_from_env(caller)
-        formatted = Pentiment.format(report, source)
+        formatted = Pentiment.format(report, source, colors: false)
         raise CompileError, description: formatted
       end
     end

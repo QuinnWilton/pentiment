@@ -80,7 +80,7 @@ defmodule Pentiment.Examples.GuardRestriction do
         end)
 
       source = Pentiment.Elixir.source_from_env(env)
-      formatted = Pentiment.format_all(reports, source)
+      formatted = Pentiment.format_all(reports, source, colors: false)
 
       raise CompileError, description: formatted
     end

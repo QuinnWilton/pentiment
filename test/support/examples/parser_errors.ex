@@ -147,7 +147,7 @@ defmodule Pentiment.Examples.ParserErrors do
           )
           |> maybe_add_note(hint)
 
-        {:error, Pentiment.format(report, source)}
+        {:error, Pentiment.format(report, source, colors: false)}
 
       {:error, message, _rest, _, {line, line_offset}, byte_offset} ->
         col = byte_offset - line_offset + 1
@@ -159,7 +159,7 @@ defmodule Pentiment.Examples.ParserErrors do
           |> Pentiment.Report.with_source(source_name)
           |> Pentiment.Report.with_label(Pentiment.Label.primary(span, "parse error here"))
 
-        {:error, Pentiment.format(report, source)}
+        {:error, Pentiment.format(report, source, colors: false)}
     end
   end
 

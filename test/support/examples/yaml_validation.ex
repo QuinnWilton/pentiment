@@ -292,7 +292,7 @@ defmodule Pentiment.Examples.YamlValidation do
         report
       end
     end)
-    |> Pentiment.format_all(source)
+    |> Pentiment.format_all(source, colors: false)
   end
 
   defp type_name(v) when is_binary(v), do: "string"
