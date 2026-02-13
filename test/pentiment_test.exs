@@ -213,6 +213,65 @@ defmodule PentimentTest do
       assert result =~ "error: No source"
     end
 
+    test "elides lines between distant labels" do
+      # 20 lines of source, labels on lines 3 and 18 (far apart).
+      lines = for i <- 1..20, do: "line #{String.pad_leading(Integer.to_string(i), 2)}"
+      content = Enum.join(lines, "\n")
+
+      report =
+        Report.error("Distant labels")
+        |> Report.with_source("test.ex")
+        |> Report.with_label(Label.primary(Span.position(3, 1, 3, 5), "first label"))
+        |> Report.with_label(Label.secondary(Span.position(18, 1, 18, 5), "second label"))
+
+      source = Source.from_string("test.ex", content)
+      result = Pentiment.format(report, source, colors: false)
+
+      # Both labels should be present.
+      assert result =~ "first label"
+      assert result =~ "second label"
+
+      # Context around each label (default 2 lines).
+      assert result =~ "line  1"
+      assert result =~ "line  3"
+      assert result =~ "line  5"
+      assert result =~ "line 18"
+      assert result =~ "line 16"
+      assert result =~ "line 20"
+
+      # Lines in the gap should be elided.
+      refute result =~ "line  8"
+      refute result =~ "line 10"
+      refute result =~ "line 12"
+
+      # Gap marker should be present.
+      assert result =~ "⋮"
+    end
+
+    test "does not elide when labels are close together" do
+      lines = for i <- 1..10, do: "line #{i}"
+      content = Enum.join(lines, "\n")
+
+      report =
+        Report.error("Close labels")
+        |> Report.with_source("test.ex")
+        |> Report.with_label(Label.primary(Span.position(3, 1, 3, 5), "first"))
+        |> Report.with_label(Label.secondary(Span.position(6, 1, 6, 5), "second"))
+
+      source = Source.from_string("test.ex", content)
+      result = Pentiment.format(report, source, colors: false)
+
+      # All lines between labels should be visible (ranges overlap).
+      assert result =~ "line 1"
+      assert result =~ "line 3"
+      assert result =~ "line 5"
+      assert result =~ "line 6"
+      assert result =~ "line 8"
+
+      # No gap marker needed.
+      refute result =~ "⋮"
+    end
+
     test "handles multiple labels on same line" do
       report =
         Report.error("Multiple labels")

@@ -264,18 +264,6 @@ defmodule Pentiment.Formatter.Renderer do
         line
       end)
 
-    # Calculate line range.
-    span_lines =
-      Enum.map(sorted_labels, fn label ->
-        %Span.Position{start_line: line} = Label.resolved_span(label)
-        line
-      end)
-
-    min_line = max(1, Enum.min(span_lines) - context_lines)
-    max_line = Enum.max(span_lines) + context_lines
-
-    padding = String.duplicate(" ", line_num_width)
-
     # Group labels by line.
     label_map =
       Enum.group_by(sorted_labels, fn label ->
@@ -283,29 +271,55 @@ defmodule Pentiment.Formatter.Renderer do
         line
       end)
 
-    # Format each line in range.
+    # Compute visible ranges: each label gets context_lines above and below.
+    # Overlapping or adjacent ranges are merged into contiguous chunks.
+    span_lines =
+      Enum.map(sorted_labels, fn label ->
+        %Span.Position{start_line: line} = Label.resolved_span(label)
+        line
+      end)
+
+    ranges = compute_display_ranges(span_lines, context_lines)
+
+    padding = String.duplicate(" ", line_num_width)
+
+    # Format lines within each range, with gap markers between ranges.
     formatted_lines =
-      min_line..max_line
-      |> Enum.flat_map(fn line_num ->
-        case Source.line(source, line_num) do
-          nil ->
+      ranges
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {{range_start, range_end}, index} ->
+        gap =
+          if index > 0 do
+            [format_gap_marker(padding, use_colors)]
+          else
             []
+          end
 
-          source_line ->
-            case Map.get(label_map, line_num) do
+        lines =
+          range_start..range_end
+          |> Enum.flat_map(fn line_num ->
+            case Source.line(source, line_num) do
               nil ->
-                [format_context_line(line_num, source_line, line_num_width, use_colors)]
+                []
 
-              labels_on_line ->
-                format_labels_on_line(
-                  labels_on_line,
-                  source_line,
-                  line_num,
-                  line_num_width,
-                  use_colors
-                )
+              source_line ->
+                case Map.get(label_map, line_num) do
+                  nil ->
+                    [format_context_line(line_num, source_line, line_num_width, use_colors)]
+
+                  labels_on_line ->
+                    format_labels_on_line(
+                      labels_on_line,
+                      source_line,
+                      line_num,
+                      line_num_width,
+                      use_colors
+                    )
+                end
             end
-        end
+          end)
+
+        gap ++ lines
       end)
 
     if Enum.empty?(formatted_lines) do
@@ -327,6 +341,40 @@ defmodule Pentiment.Formatter.Renderer do
 
       ([separator] ++ formatted_lines ++ [separator, closing])
       |> Enum.join("\n")
+    end
+  end
+
+  # Computes merged display ranges from a list of label line numbers.
+  # Each label gets context_lines above and below. Overlapping or
+  # adjacent ranges are merged into single contiguous chunks.
+  defp compute_display_ranges(span_lines, context_lines) do
+    span_lines
+    |> Enum.map(fn line -> {max(1, line - context_lines), line + context_lines} end)
+    |> Enum.sort()
+    |> merge_ranges()
+  end
+
+  defp merge_ranges([]), do: []
+
+  defp merge_ranges([first | rest]) do
+    rest
+    |> Enum.reduce([first], fn {start, finish}, [{acc_start, acc_end} | acc_rest] ->
+      if start <= acc_end + 1 do
+        # Ranges overlap or are adjacent — merge.
+        [{acc_start, max(acc_end, finish)} | acc_rest]
+      else
+        # Gap — start a new range.
+        [{start, finish}, {acc_start, acc_end} | acc_rest]
+      end
+    end)
+    |> Enum.reverse()
+  end
+
+  defp format_gap_marker(padding, use_colors) do
+    if use_colors do
+      "#{padding} #{@colors.dim}⋮#{@colors.reset}"
+    else
+      "#{padding} ⋮"
     end
   end
 
