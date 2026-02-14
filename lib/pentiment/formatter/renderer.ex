@@ -55,7 +55,8 @@ defmodule Pentiment.Formatter.Renderer do
     top_left: "╭",
     bottom_left: "╰",
     dot: "•",
-    tee_down: "┬"
+    tee_down: "┬",
+    bracket_bar: "┃"
   }
 
   # Maximum width for source lines.
@@ -264,22 +265,42 @@ defmodule Pentiment.Formatter.Renderer do
         line
       end)
 
-    # Group labels by line.
+    # Partition into bracket vs inline labels.
+    {bracket_labels, inline_labels} = Enum.split_with(sorted_labels, &Label.bracket?/1)
+
+    # Group inline labels by their start line.
     label_map =
-      Enum.group_by(sorted_labels, fn label ->
+      Enum.group_by(inline_labels, fn label ->
         %Span.Position{start_line: line} = Label.resolved_span(label)
         line
       end)
 
-    # Compute visible ranges: each label gets context_lines above and below.
-    # Overlapping or adjacent ranges are merged into contiguous chunks.
-    span_lines =
-      Enum.map(sorted_labels, fn label ->
+    # Compute bracket active-lines map and column count.
+    bracket_map = compute_bracket_map(bracket_labels)
+    bracket_col_count = compute_bracket_col_count(bracket_map)
+
+    # Compute visible ranges from inline labels.
+    inline_span_lines =
+      Enum.map(inline_labels, fn label ->
         %Span.Position{start_line: line} = Label.resolved_span(label)
         line
       end)
 
-    ranges = compute_display_ranges(span_lines, context_lines)
+    inline_ranges = compute_display_ranges(inline_span_lines, context_lines)
+
+    # Compute visible ranges from bracket labels (full line range, no elision within).
+    bracket_ranges =
+      Enum.map(bracket_labels, fn label ->
+        span = Label.resolved_span(label)
+        end_line = span.end_line || span.start_line
+        {max(1, span.start_line - context_lines), end_line + context_lines}
+      end)
+
+    # Merge all ranges.
+    ranges =
+      (inline_ranges ++ bracket_ranges)
+      |> Enum.sort()
+      |> merge_ranges()
 
     padding = String.duplicate(" ", line_num_width)
 
@@ -290,7 +311,7 @@ defmodule Pentiment.Formatter.Renderer do
       |> Enum.flat_map(fn {{range_start, range_end}, index} ->
         gap =
           if index > 0 do
-            [format_gap_marker(padding, use_colors)]
+            [format_gap_marker(padding, bracket_col_count, use_colors)]
           else
             []
           end
@@ -298,25 +319,52 @@ defmodule Pentiment.Formatter.Renderer do
         lines =
           range_start..range_end
           |> Enum.flat_map(fn line_num ->
-            case Source.line(source, line_num) do
-              nil ->
-                []
+            source_lines =
+              case Source.line(source, line_num) do
+                nil ->
+                  []
 
-              source_line ->
-                case Map.get(label_map, line_num) do
-                  nil ->
-                    [format_context_line(line_num, source_line, line_num_width, use_colors)]
+                source_line ->
+                  bracket_prefix =
+                    format_bracket_prefix(line_num, bracket_map, bracket_col_count, use_colors)
 
-                  labels_on_line ->
-                    format_labels_on_line(
-                      labels_on_line,
-                      source_line,
-                      line_num,
-                      line_num_width,
-                      use_colors
-                    )
-                end
-            end
+                  case Map.get(label_map, line_num) do
+                    nil ->
+                      [
+                        format_context_line(
+                          line_num,
+                          source_line,
+                          line_num_width,
+                          bracket_prefix,
+                          use_colors
+                        )
+                      ]
+
+                    labels_on_line ->
+                      format_labels_on_line(
+                        labels_on_line,
+                        source_line,
+                        line_num,
+                        line_num_width,
+                        bracket_prefix,
+                        bracket_col_count,
+                        use_colors
+                      )
+                  end
+              end
+
+            # Emit bracket closing lines for brackets that end on this line.
+            bracket_closings =
+              format_bracket_closings(
+                line_num,
+                bracket_labels,
+                bracket_map,
+                bracket_col_count,
+                padding,
+                use_colors
+              )
+
+            source_lines ++ bracket_closings
           end)
 
         gap ++ lines
@@ -342,6 +390,151 @@ defmodule Pentiment.Formatter.Renderer do
       ([separator] ++ formatted_lines ++ [separator, closing])
       |> Enum.join("\n")
     end
+  end
+
+  # ============================================================================
+  # Bracket Label Helpers
+  # ============================================================================
+
+  # Builds a map of %{line_number => [bracket_label]} for every line in each
+  # bracket's range. When multiple brackets overlap, a line maps to multiple
+  # labels. Labels are kept in the order they appear in the input list so that
+  # the leftmost bracket in the list gets the leftmost column.
+  defp compute_bracket_map([]), do: %{}
+
+  defp compute_bracket_map(bracket_labels) do
+    Enum.reduce(bracket_labels, %{}, fn label, acc ->
+      span = Label.resolved_span(label)
+      end_line = span.end_line || span.start_line
+
+      span.start_line..end_line
+      |> Enum.reduce(acc, fn line, inner_acc ->
+        Map.update(inner_acc, line, [label], &(&1 ++ [label]))
+      end)
+    end)
+  end
+
+  # Returns the maximum number of bracket columns needed across all lines.
+  defp compute_bracket_col_count(bracket_map) when map_size(bracket_map) == 0, do: 0
+
+  defp compute_bracket_col_count(bracket_map) do
+    bracket_map
+    |> Map.values()
+    |> Enum.map(&length/1)
+    |> Enum.max()
+  end
+
+  # Formats the bracket prefix for a given line. Active brackets get `┃ `,
+  # inactive bracket columns get `  ` for alignment.
+  defp format_bracket_prefix(_line_num, _bracket_map, 0, _use_colors), do: ""
+
+  defp format_bracket_prefix(line_num, bracket_map, bracket_col_count, use_colors) do
+    active_labels = Map.get(bracket_map, line_num, [])
+
+    0..(bracket_col_count - 1)
+    |> Enum.map(fn col_idx ->
+      case Enum.at(active_labels, col_idx) do
+        nil ->
+          "  "
+
+        label ->
+          if use_colors do
+            color = priority_color(label.priority)
+            "#{color}#{@box.bracket_bar}#{@colors.reset} "
+          else
+            "#{@box.bracket_bar} "
+          end
+      end
+    end)
+    |> Enum.join()
+  end
+
+  # Emits closing lines for bracket labels whose end_line matches line_num.
+  defp format_bracket_closings(
+         line_num,
+         bracket_labels,
+         bracket_map,
+         bracket_col_count,
+         padding,
+         use_colors
+       ) do
+    closing_labels =
+      Enum.filter(bracket_labels, fn label ->
+        span = Label.resolved_span(label)
+        end_line = span.end_line || span.start_line
+        end_line == line_num
+      end)
+
+    Enum.map(closing_labels, fn label ->
+      message = label.message || ""
+
+      # Build prefix for remaining active brackets on the line below.
+      # This bracket is no longer active, so we need the prefix without it.
+      remaining_prefix =
+        format_bracket_closing_prefix(
+          label,
+          bracket_labels,
+          bracket_map,
+          bracket_col_count,
+          line_num,
+          use_colors
+        )
+
+      color = if use_colors, do: priority_color(label.priority), else: ""
+
+      if use_colors do
+        "#{padding} #{@colors.dim}#{@box.dot}#{@colors.reset} #{remaining_prefix}#{color}#{@box.bottom_left}#{@box.horizontal}#{@box.horizontal} #{message}#{@colors.reset}"
+      else
+        "#{padding} #{@box.dot} #{remaining_prefix}#{@box.bottom_left}#{@box.horizontal}#{@box.horizontal} #{message}"
+      end
+    end)
+  end
+
+  # Builds the prefix for a bracket closing line. Other brackets that are still
+  # active on this line get their bar, but the closing bracket itself gets space.
+  defp format_bracket_closing_prefix(
+         closing_label,
+         _bracket_labels,
+         _bracket_map,
+         0,
+         _line_num,
+         _use_colors
+       ) do
+    _ = closing_label
+    ""
+  end
+
+  defp format_bracket_closing_prefix(
+         closing_label,
+         _bracket_labels,
+         bracket_map,
+         bracket_col_count,
+         line_num,
+         use_colors
+       ) do
+    active_labels = Map.get(bracket_map, line_num, [])
+
+    0..(bracket_col_count - 1)
+    |> Enum.map(fn col_idx ->
+      case Enum.at(active_labels, col_idx) do
+        nil ->
+          "  "
+
+        label ->
+          if label == closing_label do
+            # This is the bracket being closed — no bar.
+            "  "
+          else
+            if use_colors do
+              color = priority_color(label.priority)
+              "#{color}#{@box.bracket_bar}#{@colors.reset} "
+            else
+              "#{@box.bracket_bar} "
+            end
+          end
+      end
+    end)
+    |> Enum.join()
   end
 
   # Computes merged display ranges from a list of label line numbers.
@@ -370,27 +563,37 @@ defmodule Pentiment.Formatter.Renderer do
     |> Enum.reverse()
   end
 
-  defp format_gap_marker(padding, use_colors) do
+  defp format_gap_marker(padding, bracket_col_count, use_colors) do
+    bracket_space = String.duplicate("  ", bracket_col_count)
+
     if use_colors do
-      "#{padding} #{@colors.dim}⋮#{@colors.reset}"
+      "#{padding} #{@colors.dim}⋮#{@colors.reset}#{bracket_space}"
     else
-      "#{padding} ⋮"
+      "#{padding} ⋮#{bracket_space}"
     end
   end
 
-  defp format_context_line(line_num, source_line, line_num_width, use_colors) do
+  defp format_context_line(line_num, source_line, line_num_width, bracket_prefix, use_colors) do
     line_str = String.pad_leading(Integer.to_string(line_num), line_num_width)
     prefix_width = line_num_width + 3
     truncated_line = truncate_source_line(source_line, prefix_width)
 
     if use_colors do
-      "#{@colors.dim}#{line_str} #{@box.vertical}#{@colors.reset} #{truncated_line}"
+      "#{@colors.dim}#{line_str} #{@box.vertical}#{@colors.reset} #{bracket_prefix}#{truncated_line}"
     else
-      "#{line_str} #{@box.vertical} #{truncated_line}"
+      "#{line_str} #{@box.vertical} #{bracket_prefix}#{truncated_line}"
     end
   end
 
-  defp format_labels_on_line(labels, source_line, line_num, line_num_width, use_colors) do
+  defp format_labels_on_line(
+         labels,
+         source_line,
+         line_num,
+         line_num_width,
+         bracket_prefix,
+         bracket_col_count,
+         use_colors
+       ) do
     padding = String.duplicate(" ", line_num_width)
     line_str = String.pad_leading(Integer.to_string(line_num), line_num_width)
     prefix_width = line_num_width + 3
@@ -398,23 +601,34 @@ defmodule Pentiment.Formatter.Renderer do
 
     source =
       if use_colors do
-        "#{@colors.dim}#{line_str}#{@colors.reset} #{@colors.dim}#{@box.vertical}#{@colors.reset} #{truncated_line}"
+        "#{@colors.dim}#{line_str}#{@colors.reset} #{@colors.dim}#{@box.vertical}#{@colors.reset} #{bracket_prefix}#{truncated_line}"
       else
-        "#{line_str} #{@box.vertical} #{truncated_line}"
+        "#{line_str} #{@box.vertical} #{bracket_prefix}#{truncated_line}"
       end
+
+    # Bracket padding for pointer lines (spaces for alignment).
+    pointer_bracket_pad = String.duplicate("  ", bracket_col_count)
 
     # For single label, use simple rendering (no collision possible).
     if length(labels) == 1 do
       pointer_lines =
         labels
         |> Enum.flat_map(fn label ->
-          format_single_label_pointer(label, source_line, padding, use_colors)
+          format_single_label_pointer(
+            label,
+            source_line,
+            padding,
+            pointer_bracket_pad,
+            use_colors
+          )
         end)
 
       [source | pointer_lines]
     else
       # Multiple labels: use collision-aware rendering.
-      pointer_lines = format_multi_label_pointers(labels, source_line, padding, use_colors)
+      pointer_lines =
+        format_multi_label_pointers(labels, source_line, padding, pointer_bracket_pad, use_colors)
+
       [source | pointer_lines]
     end
   end
@@ -422,7 +636,7 @@ defmodule Pentiment.Formatter.Renderer do
   # Renders multiple labels with collision avoidance.
   # Labels are sorted right-to-left, with rightmost getting the closest position
   # to its underline. Vertical connectors extend down for labels further left.
-  defp format_multi_label_pointers(labels, source_line, padding, use_colors) do
+  defp format_multi_label_pointers(labels, source_line, padding, bracket_pad, use_colors) do
     # Phase 1: Compute geometry for each label.
     geometries =
       Enum.map(labels, fn label ->
@@ -455,7 +669,7 @@ defmodule Pentiment.Formatter.Renderer do
           |> Enum.map(fn g -> g.tee_col end)
           |> MapSet.new()
 
-        render_underline_row(group, connector_cols, padding, use_colors)
+        render_underline_row(group, connector_cols, padding, bracket_pad, use_colors)
       end)
 
     # Phase 6: Render message rows with connectors.
@@ -469,7 +683,7 @@ defmodule Pentiment.Formatter.Renderer do
           |> Enum.map(fn {g, _} -> g.tee_col end)
           |> MapSet.new()
 
-        render_message_row(geom, connector_cols, padding, use_colors)
+        render_message_row(geom, connector_cols, padding, bracket_pad, use_colors)
       end)
 
     underline_lines ++ message_lines
@@ -530,7 +744,7 @@ defmodule Pentiment.Formatter.Renderer do
 
   # Renders a single underline row containing multiple non-overlapping geometries.
   # Also renders vertical connectors for labels from earlier underline rows.
-  defp render_underline_row(geometries, connector_cols, padding, use_colors) do
+  defp render_underline_row(geometries, connector_cols, padding, bracket_pad, use_colors) do
     # Find the rightmost column we need to render (consider both underlines and connectors).
     max_col_from_geoms = Enum.max_by(geometries, fn g -> g.end_col end).end_col
 
@@ -592,16 +806,16 @@ defmodule Pentiment.Formatter.Renderer do
 
     line =
       if use_colors do
-        "#{padding} #{@colors.dim}#{@box.dot}#{@colors.reset} #{chars}"
+        "#{padding} #{@colors.dim}#{@box.dot}#{@colors.reset} #{bracket_pad}#{chars}"
       else
-        "#{padding} #{@box.dot} #{chars}"
+        "#{padding} #{@box.dot} #{bracket_pad}#{chars}"
       end
 
     [line]
   end
 
   # Renders a message row with vertical connectors for labels not yet rendered.
-  defp render_message_row(geom, connector_cols, padding, use_colors) do
+  defp render_message_row(geom, connector_cols, padding, bracket_pad, use_colors) do
     # The message appears after the branch symbol.
     # Format: spaces... connector... spaces... ╰── message
 
@@ -645,16 +859,16 @@ defmodule Pentiment.Formatter.Renderer do
 
     line =
       if use_colors do
-        "#{padding} #{@colors.dim}#{@box.dot}#{@colors.reset} #{chars}#{branch_suffix}"
+        "#{padding} #{@colors.dim}#{@box.dot}#{@colors.reset} #{bracket_pad}#{chars}#{branch_suffix}"
       else
-        "#{padding} #{@box.dot} #{chars}#{branch_suffix}"
+        "#{padding} #{@box.dot} #{bracket_pad}#{chars}#{branch_suffix}"
       end
 
     [line]
   end
 
   # Single label pointer rendering (original simple logic).
-  defp format_single_label_pointer(label, source_line, padding, use_colors) do
+  defp format_single_label_pointer(label, source_line, padding, bracket_pad, use_colors) do
     span = Label.resolved_span(label)
     message = label.message
     priority = label.priority
@@ -675,17 +889,17 @@ defmodule Pentiment.Formatter.Renderer do
 
     if use_colors do
       underline_line =
-        "#{padding} #{@colors.dim}#{@box.dot}#{@colors.reset} #{pointer_padding}#{span_color}#{underline}#{@colors.reset}"
+        "#{padding} #{@colors.dim}#{@box.dot}#{@colors.reset} #{bracket_pad}#{pointer_padding}#{span_color}#{underline}#{@colors.reset}"
 
       label_line =
-        "#{padding} #{@colors.dim}#{@box.dot}#{@colors.reset} #{branch_padding}#{span_color}#{@box.bottom_left}#{@box.horizontal}#{@box.horizontal} #{label_text}#{@colors.reset}"
+        "#{padding} #{@colors.dim}#{@box.dot}#{@colors.reset} #{bracket_pad}#{branch_padding}#{span_color}#{@box.bottom_left}#{@box.horizontal}#{@box.horizontal} #{label_text}#{@colors.reset}"
 
       [underline_line, label_line]
     else
-      underline_line = "#{padding} #{@box.dot} #{pointer_padding}#{underline}"
+      underline_line = "#{padding} #{@box.dot} #{bracket_pad}#{pointer_padding}#{underline}"
 
       label_line =
-        "#{padding} #{@box.dot} #{branch_padding}#{@box.bottom_left}#{@box.horizontal}#{@box.horizontal} #{label_text}"
+        "#{padding} #{@box.dot} #{bracket_pad}#{branch_padding}#{@box.bottom_left}#{@box.horizontal}#{@box.horizontal} #{label_text}"
 
       [underline_line, label_line]
     end
@@ -808,10 +1022,14 @@ defmodule Pentiment.Formatter.Renderer do
   defp calculate_line_num_width(labels, context_lines) do
     max_line =
       labels
-      |> Enum.map(fn label ->
+      |> Enum.flat_map(fn label ->
         case Label.resolved_span(label) do
-          %Span.Position{start_line: line} -> line + context_lines
-          _ -> 1
+          %Span.Position{start_line: line, end_line: end_line} ->
+            # Account for end_line of bracket labels (may be larger).
+            [line + context_lines, (end_line || line) + context_lines]
+
+          _ ->
+            [1]
         end
       end)
       |> Enum.max(fn -> 1 end)
