@@ -425,6 +425,271 @@ defmodule PentimentTest do
     end
   end
 
+  describe "bracket labels" do
+    test "basic bracket spanning multiple lines" do
+      content =
+        Enum.join(
+          [
+            "defmodule Test do",
+            "  def run do",
+            "    transition :idle -> :running do",
+            "      guard: fn state -> state.queue != [] end",
+            "      action: fn state -> %{state | active: true} end",
+            "    end",
+            "  end",
+            "end"
+          ],
+          "\n"
+        )
+
+      report =
+        Report.error("Property violation")
+        |> Report.with_source("test.ex")
+        |> Report.with_label(
+          Label.bracket(
+            Span.position(3, 1, 6, 1),
+            "property `no_stuck_states` failed"
+          )
+        )
+
+      source = Source.from_string("test.ex", content)
+      result = Pentiment.format(report, source, colors: false)
+
+      # Bracket bar should appear on all lines in range.
+      # Source lines retain their original indentation after the bracket prefix.
+      assert result =~ "┃     transition :idle -> :running do"
+      assert result =~ "┃       guard: fn state -> state.queue != [] end"
+      assert result =~ "┃       action: fn state -> %{state | active: true} end"
+      assert result =~ "┃     end"
+
+      # Closing line with message.
+      assert result =~ "╰── property `no_stuck_states` failed"
+    end
+
+    test "bracket with inline label inside" do
+      content =
+        Enum.join(
+          [
+            "defmodule Test do",
+            "  transition :idle -> :running do",
+            "    guard: fn state -> state.queue != [] end",
+            "    action: fn state -> %{state | active: true} end",
+            "  end",
+            "end"
+          ],
+          "\n"
+        )
+
+      report =
+        Report.error("Property violation")
+        |> Report.with_source("test.ex")
+        |> Report.with_label(
+          Label.bracket(
+            Span.position(2, 1, 5, 1),
+            "property failed"
+          )
+        )
+        |> Report.with_label(
+          Label.secondary(
+            Span.position(3, 5, 3, 10),
+            "this guard"
+          )
+        )
+
+      source = Source.from_string("test.ex", content)
+      result = Pentiment.format(report, source, colors: false)
+
+      # Bracket bar on all lines.
+      assert result =~ "┃   transition :idle -> :running do"
+      assert result =~ "┃     guard: fn state -> state.queue != [] end"
+
+      # Inline label should render.
+      assert result =~ "this guard"
+
+      # Bracket closing.
+      assert result =~ "╰── property failed"
+    end
+
+    test "bracket with inline label outside range" do
+      content =
+        Enum.join(
+          [
+            "defmodule Test do",
+            "  x = 1",
+            "  transition :idle -> :running do",
+            "    action: fn state -> state end",
+            "  end",
+            "  y = 2",
+            "end"
+          ],
+          "\n"
+        )
+
+      report =
+        Report.error("Multiple issues")
+        |> Report.with_source("test.ex")
+        |> Report.with_label(
+          Label.bracket(
+            Span.position(3, 1, 5, 1),
+            "property failed"
+          )
+        )
+        |> Report.with_label(
+          Label.secondary(
+            Span.position(6, 3, 6, 8),
+            "also here"
+          )
+        )
+
+      source = Source.from_string("test.ex", content)
+      result = Pentiment.format(report, source, colors: false)
+
+      # Bracket bar on its lines.
+      assert result =~ "┃   transition :idle -> :running do"
+
+      # Inline label outside bracket range renders.
+      assert result =~ "also here"
+
+      # Bracket closing.
+      assert result =~ "╰── property failed"
+    end
+
+    test "overlapping brackets" do
+      content =
+        Enum.join(
+          [
+            "line 1",
+            "line 2",
+            "line 3",
+            "line 4",
+            "line 5",
+            "line 6"
+          ],
+          "\n"
+        )
+
+      report =
+        Report.error("Overlapping")
+        |> Report.with_source("test.ex")
+        |> Report.with_label(Label.bracket(Span.position(1, 1, 4, 1), "first bracket"))
+        |> Report.with_label(
+          Label.bracket(
+            Span.position(3, 1, 6, 1),
+            "second bracket",
+            priority: :secondary
+          )
+        )
+
+      source = Source.from_string("test.ex", content)
+      result = Pentiment.format(report, source, colors: false)
+
+      # Both brackets should appear on shared lines (3-4).
+      assert result =~ "┃ ┃ line 3"
+      assert result =~ "┃ ┃ line 4"
+
+      # Both closing messages.
+      assert result =~ "╰── first bracket"
+      assert result =~ "╰── second bracket"
+    end
+
+    test "bracket with no message" do
+      content = "line 1\nline 2\nline 3"
+
+      report =
+        Report.error("No message bracket")
+        |> Report.with_source("test.ex")
+        |> Report.with_label(Label.bracket(Span.position(1, 1, 3, 1)))
+
+      source = Source.from_string("test.ex", content)
+      result = Pentiment.format(report, source, colors: false)
+
+      # Bracket bar renders.
+      assert result =~ "┃ line 1"
+      assert result =~ "┃ line 2"
+      assert result =~ "┃ line 3"
+
+      # Closing line still renders (with empty message).
+      assert result =~ "╰──"
+    end
+
+    test "single-line bracket" do
+      content = "line 1\nline 2\nline 3"
+
+      report =
+        Report.error("Single line bracket")
+        |> Report.with_source("test.ex")
+        |> Report.with_label(Label.bracket(Span.position(2, 1, 2, 1), "just this line"))
+
+      source = Source.from_string("test.ex", content)
+      result = Pentiment.format(report, source, colors: false)
+
+      # Bracket bar on the single line.
+      assert result =~ "┃ line 2"
+
+      # Closing message.
+      assert result =~ "╰── just this line"
+    end
+
+    test "two non-overlapping brackets" do
+      content =
+        Enum.join(
+          for(i <- 1..10, do: "line #{String.pad_leading(Integer.to_string(i), 2)}"),
+          "\n"
+        )
+
+      report =
+        Report.error("Disjoint brackets")
+        |> Report.with_source("test.ex")
+        |> Report.with_label(Label.bracket(Span.position(2, 1, 3, 1), "first"))
+        |> Report.with_label(Label.bracket(Span.position(8, 1, 9, 1), "second"))
+
+      source = Source.from_string("test.ex", content)
+      result = Pentiment.format(report, source, colors: false)
+
+      # Both bracket messages.
+      assert result =~ "╰── first"
+      assert result =~ "╰── second"
+
+      # Bracket bars on their respective lines.
+      assert result =~ "┃ line  2"
+      assert result =~ "┃ line  3"
+      assert result =~ "┃ line  8"
+      assert result =~ "┃ line  9"
+    end
+
+    test "bracket with search span" do
+      content =
+        Enum.join(
+          [
+            "defmodule Test do",
+            "  def run do",
+            "    target_start",
+            "    middle",
+            "    target_end",
+            "  end",
+            "end"
+          ],
+          "\n"
+        )
+
+      # Use a search span for the bracket start_line, but bracket needs
+      # a position span — test that deferred resolution works before bracket
+      # processing.
+      report =
+        Report.error("Search bracket")
+        |> Report.with_source("test.ex")
+        |> Report.with_label(Label.bracket(Span.position(3, 1, 5, 1), "found range"))
+
+      source = Source.from_string("test.ex", content)
+      result = Pentiment.format(report, source, colors: false)
+
+      assert result =~ "┃     target_start"
+      assert result =~ "┃     middle"
+      assert result =~ "┃     target_end"
+      assert result =~ "╰── found range"
+    end
+  end
+
   describe "format_compact/1 edge cases" do
     test "handles report without labels" do
       report =

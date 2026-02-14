@@ -154,6 +154,59 @@ defmodule Pentiment.LabelTest do
     end
   end
 
+  describe "bracket/3" do
+    test "creates bracket label with message" do
+      span = Span.position(5, 1, 10, 1)
+      label = Label.bracket(span, "property failed")
+
+      assert label.span == span
+      assert label.message == "property failed"
+      assert label.priority == :primary
+      assert label.style == :bracket
+    end
+
+    test "creates bracket label without message" do
+      span = Span.position(5, 1, 10, 1)
+      label = Label.bracket(span)
+
+      assert label.message == nil
+      assert label.style == :bracket
+    end
+
+    test "accepts source option" do
+      span = Span.position(5, 1, 10, 1)
+      label = Label.bracket(span, "msg", source: "file.ex")
+
+      assert label.source == "file.ex"
+    end
+  end
+
+  describe "bracket?/1" do
+    test "returns true for bracket labels" do
+      label = Label.bracket(Span.position(1, 1, 5, 1), "msg")
+
+      assert Label.bracket?(label)
+    end
+
+    test "returns false for primary labels" do
+      label = Label.primary(Span.position(1, 1), "msg")
+
+      refute Label.bracket?(label)
+    end
+
+    test "returns false for secondary labels" do
+      label = Label.secondary(Span.position(1, 1), "msg")
+
+      refute Label.bracket?(label)
+    end
+
+    test "returns true for labels created with style: :bracket" do
+      label = Label.new(Span.position(1, 1, 5, 1), style: :bracket)
+
+      assert Label.bracket?(label)
+    end
+  end
+
   describe "resolved_span/1" do
     test "returns Position span unchanged" do
       span = Span.position(5, 10, 5, 20)
