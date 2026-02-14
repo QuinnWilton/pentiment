@@ -457,10 +457,10 @@ defmodule PentimentTest do
 
       # Bracket bar should appear on all lines in range.
       # Source lines retain their original indentation after the bracket prefix.
-      assert result =~ "┃     transition :idle -> :running do"
-      assert result =~ "┃       guard: fn state -> state.queue != [] end"
-      assert result =~ "┃       action: fn state -> %{state | active: true} end"
-      assert result =~ "┃     end"
+      assert result =~ "│     transition :idle -> :running do"
+      assert result =~ "│       guard: fn state -> state.queue != [] end"
+      assert result =~ "│       action: fn state -> %{state | active: true} end"
+      assert result =~ "│     end"
 
       # Closing line with message.
       assert result =~ "╰── property `no_stuck_states` failed"
@@ -500,8 +500,8 @@ defmodule PentimentTest do
       result = Pentiment.format(report, source, colors: false)
 
       # Bracket bar on all lines.
-      assert result =~ "┃   transition :idle -> :running do"
-      assert result =~ "┃     guard: fn state -> state.queue != [] end"
+      assert result =~ "│   transition :idle -> :running do"
+      assert result =~ "│     guard: fn state -> state.queue != [] end"
 
       # Inline label should render.
       assert result =~ "this guard"
@@ -545,7 +545,7 @@ defmodule PentimentTest do
       result = Pentiment.format(report, source, colors: false)
 
       # Bracket bar on its lines.
-      assert result =~ "┃   transition :idle -> :running do"
+      assert result =~ "│   transition :idle -> :running do"
 
       # Inline label outside bracket range renders.
       assert result =~ "also here"
@@ -584,12 +584,12 @@ defmodule PentimentTest do
       result = Pentiment.format(report, source, colors: false)
 
       # Both brackets should appear on shared lines (3-4).
-      assert result =~ "┃ ┃ line 3"
-      assert result =~ "┃ ┃ line 4"
+      assert result =~ "│ │ line 3"
+      assert result =~ "│ │ line 4"
 
-      # Both closing messages.
-      assert result =~ "╰── first bracket"
-      assert result =~ "╰── second bracket"
+      # Both closing messages. Dashes extend through remaining bracket columns.
+      assert result =~ "╰──── first bracket"
+      assert result =~ "╰──── second bracket"
     end
 
     test "bracket with no message" do
@@ -604,9 +604,9 @@ defmodule PentimentTest do
       result = Pentiment.format(report, source, colors: false)
 
       # Bracket bar renders.
-      assert result =~ "┃ line 1"
-      assert result =~ "┃ line 2"
-      assert result =~ "┃ line 3"
+      assert result =~ "│ line 1"
+      assert result =~ "│ line 2"
+      assert result =~ "│ line 3"
 
       # Closing line still renders (with empty message).
       assert result =~ "╰──"
@@ -624,7 +624,7 @@ defmodule PentimentTest do
       result = Pentiment.format(report, source, colors: false)
 
       # Bracket bar on the single line.
-      assert result =~ "┃ line 2"
+      assert result =~ "│ line 2"
 
       # Closing message.
       assert result =~ "╰── just this line"
@@ -651,10 +651,10 @@ defmodule PentimentTest do
       assert result =~ "╰── second"
 
       # Bracket bars on their respective lines.
-      assert result =~ "┃ line  2"
-      assert result =~ "┃ line  3"
-      assert result =~ "┃ line  8"
-      assert result =~ "┃ line  9"
+      assert result =~ "│ line  2"
+      assert result =~ "│ line  3"
+      assert result =~ "│ line  8"
+      assert result =~ "│ line  9"
     end
 
     test "bracket with search span" do
@@ -683,9 +683,9 @@ defmodule PentimentTest do
       source = Source.from_string("test.ex", content)
       result = Pentiment.format(report, source, colors: false)
 
-      assert result =~ "┃     target_start"
-      assert result =~ "┃     middle"
-      assert result =~ "┃     target_end"
+      assert result =~ "│     target_start"
+      assert result =~ "│     middle"
+      assert result =~ "│     target_end"
       assert result =~ "╰── found range"
     end
   end
