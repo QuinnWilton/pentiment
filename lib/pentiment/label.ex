@@ -32,11 +32,13 @@ defmodule Pentiment.Label do
   alias Pentiment.Spannable
 
   @type priority :: :primary | :secondary
+  @type style :: :inline | :bracket
 
   @type t :: %__MODULE__{
           span: Pentiment.Span.t() | Spannable.t(),
           message: String.t() | nil,
           priority: priority(),
+          style: style(),
           source: String.t() | nil
         }
 
@@ -45,7 +47,8 @@ defmodule Pentiment.Label do
     :span,
     :message,
     :source,
-    priority: :primary
+    priority: :primary,
+    style: :inline
   ]
 
   @doc """
@@ -55,6 +58,7 @@ defmodule Pentiment.Label do
 
   - `:message` - The annotation message (optional)
   - `:priority` - `:primary` or `:secondary` (default: `:primary`)
+  - `:style` - `:inline` or `:bracket` (default: `:inline`)
   - `:source` - Source identifier for multi-file diagnostics (optional)
 
   ## Examples
@@ -68,6 +72,7 @@ defmodule Pentiment.Label do
       span: span,
       message: Keyword.get(opts, :message),
       priority: Keyword.get(opts, :priority, :primary),
+      style: Keyword.get(opts, :style, :inline),
       source: Keyword.get(opts, :source)
     }
   end
@@ -106,6 +111,30 @@ defmodule Pentiment.Label do
   def secondary(span, message \\ nil, opts \\ []) do
     new(span, Keyword.merge(opts, message: message, priority: :secondary))
   end
+
+  @doc """
+  Creates a bracket label that highlights a multi-line block.
+
+  Bracket labels draw a vertical bar (`┃`) in the left margin across a range
+  of lines, with a `╰── message` tail below. The span must cover the full
+  line range (use `end_line` in the position span).
+
+  ## Examples
+
+      iex> Label.bracket(span, "property `no_stuck_states` failed")
+      %Label{span: span, message: "property `no_stuck_states` failed", style: :bracket}
+  """
+  @spec bracket(Pentiment.Span.t() | Spannable.t(), String.t() | nil, keyword()) :: t()
+  def bracket(span, message \\ nil, opts \\ []) do
+    new(span, Keyword.merge(opts, message: message, priority: :primary, style: :bracket))
+  end
+
+  @doc """
+  Returns true if this is a bracket label.
+  """
+  @spec bracket?(t()) :: boolean()
+  def bracket?(%__MODULE__{style: :bracket}), do: true
+  def bracket?(%__MODULE__{}), do: false
 
   @doc """
   Returns the resolved span as a `Pentiment.Span.t()`.
