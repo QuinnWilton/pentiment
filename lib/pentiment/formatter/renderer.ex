@@ -56,7 +56,7 @@ defmodule Pentiment.Formatter.Renderer do
     bottom_left: "╰",
     dot: "•",
     tee_down: "┬",
-    bracket_bar: "┃"
+    bracket_bar: "│"
   }
 
   # Maximum width for source lines.
@@ -450,6 +450,8 @@ defmodule Pentiment.Formatter.Renderer do
   end
 
   # Emits closing lines for bracket labels whose end_line matches line_num.
+  # The ╰── tail is placed at the bracket's column so it aligns with the ┃ bars.
+  # Horizontal dashes extend through any remaining bracket columns to the right.
   defp format_bracket_closings(
          line_num,
          bracket_labels,
@@ -467,74 +469,42 @@ defmodule Pentiment.Formatter.Renderer do
 
     Enum.map(closing_labels, fn label ->
       message = label.message || ""
+      active_labels = Map.get(bracket_map, line_num, [])
+      closing_col_idx = Enum.find_index(active_labels, &(&1 == label)) || 0
 
-      # Build prefix for remaining active brackets on the line below.
-      # This bracket is no longer active, so we need the prefix without it.
-      remaining_prefix =
-        format_bracket_closing_prefix(
-          label,
-          bracket_labels,
-          bracket_map,
-          bracket_col_count,
-          line_num,
-          use_colors
-        )
+      # Prefix: bars for active brackets in columns before the closing one.
+      pre_prefix =
+        if closing_col_idx > 0 do
+          Enum.map_join(0..(closing_col_idx - 1)//1, fn col_idx ->
+            case Enum.at(active_labels, col_idx) do
+              nil ->
+                "  "
+
+              other_label ->
+                if use_colors do
+                  color = priority_color(other_label.priority)
+                  "#{color}#{@box.bracket_bar}#{@colors.reset} "
+                else
+                  "#{@box.bracket_bar} "
+                end
+            end
+          end)
+        else
+          ""
+        end
+
+      # Extend dashes through remaining bracket columns after the closing one.
+      remaining_cols = bracket_col_count - closing_col_idx - 1
+      dash_ext = String.duplicate(@box.horizontal <> @box.horizontal, remaining_cols)
 
       color = if use_colors, do: priority_color(label.priority), else: ""
 
       if use_colors do
-        "#{padding} #{@colors.dim}#{@box.dot}#{@colors.reset} #{remaining_prefix}#{color}#{@box.bottom_left}#{@box.horizontal}#{@box.horizontal} #{message}#{@colors.reset}"
+        "#{padding} #{@colors.dim}#{@box.dot}#{@colors.reset} #{pre_prefix}#{color}#{@box.bottom_left}#{@box.horizontal}#{dash_ext}#{@box.horizontal} #{message}#{@colors.reset}"
       else
-        "#{padding} #{@box.dot} #{remaining_prefix}#{@box.bottom_left}#{@box.horizontal}#{@box.horizontal} #{message}"
+        "#{padding} #{@box.dot} #{pre_prefix}#{@box.bottom_left}#{@box.horizontal}#{dash_ext}#{@box.horizontal} #{message}"
       end
     end)
-  end
-
-  # Builds the prefix for a bracket closing line. Other brackets that are still
-  # active on this line get their bar, but the closing bracket itself gets space.
-  defp format_bracket_closing_prefix(
-         closing_label,
-         _bracket_labels,
-         _bracket_map,
-         0,
-         _line_num,
-         _use_colors
-       ) do
-    _ = closing_label
-    ""
-  end
-
-  defp format_bracket_closing_prefix(
-         closing_label,
-         _bracket_labels,
-         bracket_map,
-         bracket_col_count,
-         line_num,
-         use_colors
-       ) do
-    active_labels = Map.get(bracket_map, line_num, [])
-
-    0..(bracket_col_count - 1)
-    |> Enum.map(fn col_idx ->
-      case Enum.at(active_labels, col_idx) do
-        nil ->
-          "  "
-
-        label ->
-          if label == closing_label do
-            # This is the bracket being closed — no bar.
-            "  "
-          else
-            if use_colors do
-              color = priority_color(label.priority)
-              "#{color}#{@box.bracket_bar}#{@colors.reset} "
-            else
-              "#{@box.bracket_bar} "
-            end
-          end
-      end
-    end)
-    |> Enum.join()
   end
 
   # Computes merged display ranges from a list of label line numbers.
