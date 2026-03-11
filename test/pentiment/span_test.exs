@@ -37,6 +37,60 @@ defmodule Pentiment.SpanTest do
     end
   end
 
+  describe "Byte.merge/2" do
+    test "merges non-overlapping spans" do
+      a = Byte.new(5, 3)
+      b = Byte.new(10, 2)
+
+      result = Byte.merge(a, b)
+
+      assert %Byte{start: 5, length: 7} = result
+    end
+
+    test "merges overlapping spans" do
+      a = Byte.new(5, 5)
+      b = Byte.new(8, 4)
+
+      result = Byte.merge(a, b)
+
+      assert %Byte{start: 5, length: 7} = result
+    end
+
+    test "merges when second span is contained in first" do
+      a = Byte.new(1, 10)
+      b = Byte.new(3, 2)
+
+      result = Byte.merge(a, b)
+
+      assert %Byte{start: 1, length: 10} = result
+    end
+
+    test "merges when first span is contained in second" do
+      a = Byte.new(3, 2)
+      b = Byte.new(1, 10)
+
+      result = Byte.merge(a, b)
+
+      assert %Byte{start: 1, length: 10} = result
+    end
+
+    test "merges adjacent spans" do
+      a = Byte.new(0, 5)
+      b = Byte.new(5, 3)
+
+      result = Byte.merge(a, b)
+
+      assert %Byte{start: 0, length: 8} = result
+    end
+
+    test "is commutative" do
+      a = Byte.new(2, 4)
+      b = Byte.new(8, 3)
+
+      assert Byte.merge(a, b) == Byte.merge(b, a)
+    end
+  end
+
   describe "Byte.resolve/2" do
     test "returns point span when source is nil" do
       byte_span = Byte.new(10, 5)
@@ -430,6 +484,51 @@ defmodule Pentiment.SpanTest do
 
         assert span.start == start
         assert span.length == length
+      end
+    end
+  end
+
+  describe "property tests for Byte.merge" do
+    property "merge is commutative" do
+      check all(
+              a_start <- non_negative_integer(),
+              a_length <- positive_integer(),
+              b_start <- non_negative_integer(),
+              b_length <- positive_integer()
+            ) do
+        a = Byte.new(a_start, a_length)
+        b = Byte.new(b_start, b_length)
+
+        assert Byte.merge(a, b) == Byte.merge(b, a)
+      end
+    end
+
+    property "merge result covers both inputs" do
+      check all(
+              a_start <- non_negative_integer(),
+              a_length <- positive_integer(),
+              b_start <- non_negative_integer(),
+              b_length <- positive_integer()
+            ) do
+        a = Byte.new(a_start, a_length)
+        b = Byte.new(b_start, b_length)
+        m = Byte.merge(a, b)
+
+        assert m.start <= a.start
+        assert m.start <= b.start
+        assert m.start + m.length >= a.start + a.length
+        assert m.start + m.length >= b.start + b.length
+      end
+    end
+
+    property "merge with self is identity" do
+      check all(
+              start <- non_negative_integer(),
+              length <- positive_integer()
+            ) do
+        span = Byte.new(start, length)
+
+        assert Byte.merge(span, span) == span
       end
     end
   end

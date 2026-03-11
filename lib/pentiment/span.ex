@@ -107,6 +107,28 @@ defmodule Pentiment.Span do
           end
       end
     end
+
+    @doc """
+    Merges two byte spans into the smallest span covering both.
+
+    ## Examples
+
+        iex> a = Pentiment.Span.Byte.new(5, 3)
+        iex> b = Pentiment.Span.Byte.new(10, 2)
+        iex> Pentiment.Span.Byte.merge(a, b)
+        %Pentiment.Span.Byte{start: 5, length: 7}
+
+        iex> a = Pentiment.Span.Byte.new(1, 10)
+        iex> b = Pentiment.Span.Byte.new(3, 2)
+        iex> Pentiment.Span.Byte.merge(a, b)
+        %Pentiment.Span.Byte{start: 1, length: 10}
+    """
+    @spec merge(t(), t()) :: t()
+    def merge(%__MODULE__{} = a, %__MODULE__{} = b) do
+      start = min(a.start, b.start)
+      stop = max(a.start + a.length, b.start + b.length)
+      %__MODULE__{start: start, length: stop - start}
+    end
   end
 
   # ============================================================================
