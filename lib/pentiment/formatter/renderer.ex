@@ -21,6 +21,14 @@ defmodule Pentiment.Formatter.Renderer do
          ╰─────
             note: `+` with integer arguments returns integer
             help: consider using `trunc(1.5)`
+
+  ## Multi-file Diagnostics
+
+  Labels carrying their own `:source` render as continuation frames inside
+  the same diagnostic: the report's own file opens the frame with `╭─[...]`,
+  each additional file is introduced with `├─[file:line:col]` and rendered
+  against its own source, and a single `╰─────` closes the frame. Groups
+  whose source is missing from the provided sources render header-only.
   """
 
   alias Pentiment.{Diagnostic, Label, Source, Span}

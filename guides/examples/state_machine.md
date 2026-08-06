@@ -132,6 +132,44 @@ end
 - **Multiple labels**: Use primary for the error, secondary for context
 - **`source:` option**: Labels can reference different source files
 
+## Cross-file Output
+
+When the similar state is defined in a different file, the `source:`
+label renders as a continuation frame against its own file:
+
+```
+error[SM001]: Transition references undefined state `runing`
+  ╭─[lib/my_app/worker_fsm.ex:4:42]
+  │
+2 │   use Pentiment.Examples.StateMachine
+3 │ 
+4 │   deftransition :start, from: :idle, to: :runing
+  •                                          ───┬───
+  •                                             ╰── undefined state
+5 │ end
+  │
+  ├─[lib/my_app/states.ex:5:12]
+  │
+3 │ 
+4 │   defstate :idle
+5 │   defstate :running
+  •            ───┬────
+  •               ╰── did you mean this state?
+6 │   defstate :done
+7 │ end
+  │
+  ╰─────
+    note: defined states are: idle, running, done
+    help: change `to: :runing` to `to: :running`
+```
+
+For the foreign file's excerpt to render, the sources you pass to
+`Pentiment.format/2,3` must include an entry for every label's
+`source:` — pass a map (`%{file_a => content_a, file_b => content_b}`).
+With a single `Pentiment.Source` (or a bare file path), groups whose
+file does not match render header-only: `├─[file:line:col]` with no
+excerpt, which still names the location.
+
 ## Testing
 
 ```elixir

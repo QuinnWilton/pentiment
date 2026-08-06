@@ -79,6 +79,13 @@ defmodule Pentiment do
     - A map of source names to `Pentiment.Source` structs
     - A file path string (will be read from disk)
 
+  For diagnostics whose labels carry their own `:source` (multi-file
+  diagnostics), pass a map covering every labeled file — labels render as
+  continuation frames against their own source. The single-`Source` and
+  file-path forms cover only the report's own file; groups for any other
+  file render header-only (`├─[file:line:col]`, no excerpt). Files are
+  never read from disk implicitly for labels.
+
   ## Options
 
   - `:colors` - Whether to use ANSI colors (default: true)
@@ -99,6 +106,12 @@ defmodule Pentiment do
 
       # Without colors
       Pentiment.format(report, source, colors: false)
+
+      # Multi-file diagnostic: cover every labeled file
+      Pentiment.format(report, %{
+        "lib/app.ex" => Pentiment.Source.from_file("lib/app.ex"),
+        "lib/other.ex" => Pentiment.Source.from_file("lib/other.ex")
+      })
   """
   @spec format(Diagnostic.t(), Source.t() | map() | String.t(), format_options()) :: String.t()
   def format(diagnostic, sources, opts \\ []) do

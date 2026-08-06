@@ -15,7 +15,12 @@ defmodule Pentiment.Label do
   ## Multi-file Diagnostics
 
   For diagnostics that span multiple files, set the `:source` field to identify
-  which file this label refers to.
+  which file this label refers to. The rich formatter renders such labels as
+  continuation frames (`├─[file:line:col]`) against their own file, inside the
+  same diagnostic frame — provide content for every labeled file in the sources
+  passed to `Pentiment.format/3`, or the foreign group renders header-only.
+  A label whose `:source` equals the report's source behaves exactly as if it
+  were `nil`.
 
   ## Examples
 
