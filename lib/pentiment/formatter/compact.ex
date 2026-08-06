@@ -52,13 +52,16 @@ defmodule Pentiment.Formatter.Compact do
   defp format_location([], _source), do: nil
 
   defp format_location([label | _], source) do
+    # A label carrying its own source names the file it actually points at.
+    effective_source = label.source || source
+
     case Label.resolved_span(label) do
       %Span.Position{start_line: line, start_column: col} ->
-        format_location_string(source, line, col)
+        format_location_string(effective_source, line, col)
 
       %Span.Byte{start: offset} ->
-        if source do
-          "#{source}:byte #{offset}"
+        if effective_source do
+          "#{effective_source}:byte #{offset}"
         else
           "byte #{offset}"
         end

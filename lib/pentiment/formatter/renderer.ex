@@ -54,6 +54,7 @@ defmodule Pentiment.Formatter.Renderer do
     horizontal: "─",
     top_left: "╭",
     bottom_left: "╰",
+    tee_left: "├",
     dot: "•",
     tee_down: "┬",
     bracket_bar: "│"
@@ -83,22 +84,28 @@ defmodule Pentiment.Formatter.Renderer do
     use_colors = Keyword.get(opts, :colors, true) and IO.ANSI.enabled?()
     context_lines = Keyword.get(opts, :context_lines, 2)
 
-    # Resolve source for this diagnostic.
-    source = resolve_source(Diagnostic.source(diagnostic), sources)
+    report_source = Diagnostic.source(diagnostic)
 
-    # Get labels and resolve any deferred spans (Search, Byte) against the source.
-    labels =
+    # Group labels by their effective source (label source, falling back to
+    # the report's source), then resolve each group's source and deferred
+    # spans (Search, Byte) against that group's own file.
+    groups =
       diagnostic
       |> Diagnostic.labels()
-      |> resolve_deferred_spans(source)
+      |> group_labels_by_source(report_source)
+      |> Enum.map(fn {name, labels} ->
+        source = resolve_source(name, sources)
+        {name, source, resolve_deferred_spans(labels, source)}
+      end)
 
-    # Calculate line number width for consistent padding.
-    line_num_width = calculate_line_num_width(labels, context_lines)
+    # Line number width is global across all groups so the frame, notes, and
+    # help all share one gutter alignment.
+    all_labels = Enum.flat_map(groups, fn {_name, _source, labels} -> labels end)
+    line_num_width = calculate_line_num_width(all_labels, context_lines)
 
     [
       format_header(diagnostic, use_colors),
-      format_location(labels, source, line_num_width, use_colors),
-      format_source_context(labels, source, context_lines, line_num_width, use_colors),
+      format_source_groups(groups, context_lines, line_num_width, use_colors),
       format_notes(diagnostic, line_num_width, use_colors),
       format_help(diagnostic, line_num_width, use_colors)
     ]
@@ -191,27 +198,135 @@ defmodule Pentiment.Formatter.Renderer do
   end
 
   # ============================================================================
-  # Location Formatting
+  # Source Grouping
   # ============================================================================
 
-  defp format_location([], _source, _line_num_width, _use_colors), do: nil
+  # Groups labels by their effective source name (`label.source`, falling back
+  # to the report's source), preserving diagnostic order within each group and
+  # ordering groups by first appearance — except the report-source group, which
+  # always leads because it owns the `╭─` frame header. A label whose `:source`
+  # explicitly equals the report's source lands in the lead group, identical to
+  # leaving it nil.
+  defp group_labels_by_source(labels, report_source) do
+    {order, grouped} =
+      Enum.reduce(labels, {[], %{}}, fn label, {order, grouped} ->
+        key = label.source || report_source
 
-  defp format_location(labels, source, line_num_width, use_colors) do
-    # Use the first label's location for the header.
+        case grouped do
+          %{^key => group} -> {order, %{grouped | key => [label | group]}}
+          _ -> {[key | order], Map.put(grouped, key, [label])}
+        end
+      end)
+
+    order
+    |> Enum.reverse()
+    |> Enum.map(fn key -> {key, Enum.reverse(grouped[key])} end)
+    |> Enum.sort_by(fn {key, _labels} -> if key == report_source, do: 0, else: 1 end)
+  end
+
+  # ============================================================================
+  # Frame Assembly
+  # ============================================================================
+
+  # Renders all source groups as one frame: the lead group opens with
+  # `╭─[...]`, continuation groups are introduced with `├─[...]`, and a single
+  # `╰─────` closes the frame. A group whose source could not be resolved
+  # renders header-only — the header already carries file, line, and column.
+  defp format_source_groups([], _context_lines, _line_num_width, _use_colors), do: nil
+
+  defp format_source_groups(groups, context_lines, line_num_width, use_colors) do
+    padding = String.duplicate(" ", line_num_width)
+
+    sections =
+      groups
+      |> Enum.with_index()
+      |> Enum.map(fn {{name, source, labels}, index} ->
+        style = if index == 0, do: :open, else: :continue
+
+        # The lead group keeps the historical header semantics (file name from
+        # the resolved source, `line X:Y` fallback when unresolved).
+        # Continuation groups always show their group name: it is the only
+        # place their file is identified, resolved source or not.
+        display_name =
+          case style do
+            :open -> if source, do: Source.name(source), else: nil
+            :continue -> name
+          end
+
+        header = format_frame_header(style, display_name, labels, line_num_width, use_colors)
+        body = format_source_context(labels, source, context_lines, line_num_width, use_colors)
+        {header, body}
+      end)
+
+    any_header? = Enum.any?(sections, fn {header, _body} -> header != nil end)
+    any_body? = Enum.any?(sections, fn {_header, body} -> body != nil end)
+
+    if any_header? or any_body? do
+      separator = format_separator(padding, use_colors)
+
+      lines =
+        Enum.flat_map(sections, fn
+          {nil, nil} -> []
+          {header, nil} -> [header]
+          {nil, body} -> [separator, body, separator]
+          {header, body} -> [header, separator, body, separator]
+        end)
+
+      # A single header-only group stays open-ended (historical behavior);
+      # anything more substantial closes the frame so a trailing continuation
+      # header never dangles.
+      closing =
+        if any_body? or length(groups) > 1 do
+          [format_frame_close(padding, use_colors)]
+        else
+          []
+        end
+
+      Enum.join(lines ++ closing, "\n")
+    else
+      nil
+    end
+  end
+
+  defp format_frame_header(_style, _display_name, [], _line_num_width, _use_colors), do: nil
+
+  defp format_frame_header(style, display_name, labels, line_num_width, use_colors) do
+    # Use the group's first label location for the header.
     case get_first_label_location(labels) do
       nil ->
         nil
 
       {line, column} ->
-        source_name = if source, do: Source.name(source), else: nil
-        location_str = format_location_string(source_name, line, column)
+        location_str = format_location_string(display_name, line, column)
         padding = String.duplicate(" ", line_num_width)
 
+        corner =
+          case style do
+            :open -> @box.top_left
+            :continue -> @box.tee_left
+          end
+
         if use_colors do
-          "#{padding} #{@colors.dim}#{@box.top_left}#{@box.horizontal}[#{@colors.reset}#{location_str}#{@colors.dim}]#{@colors.reset}"
+          "#{padding} #{@colors.dim}#{corner}#{@box.horizontal}[#{@colors.reset}#{location_str}#{@colors.dim}]#{@colors.reset}"
         else
-          "#{padding} #{@box.top_left}#{@box.horizontal}[#{location_str}]"
+          "#{padding} #{corner}#{@box.horizontal}[#{location_str}]"
         end
+    end
+  end
+
+  defp format_separator(padding, use_colors) do
+    if use_colors do
+      "#{padding} #{@colors.dim}#{@box.vertical}#{@colors.reset}"
+    else
+      "#{padding} #{@box.vertical}"
+    end
+  end
+
+  defp format_frame_close(padding, use_colors) do
+    if use_colors do
+      "#{padding} #{@colors.dim}#{@box.bottom_left}#{String.duplicate(@box.horizontal, 5)}#{@colors.reset}"
+    else
+      "#{padding} #{@box.bottom_left}#{String.duplicate(@box.horizontal, 5)}"
     end
   end
 
@@ -373,22 +488,7 @@ defmodule Pentiment.Formatter.Renderer do
     if Enum.empty?(formatted_lines) do
       nil
     else
-      separator =
-        if use_colors do
-          "#{padding} #{@colors.dim}#{@box.vertical}#{@colors.reset}"
-        else
-          "#{padding} #{@box.vertical}"
-        end
-
-      closing =
-        if use_colors do
-          "#{padding} #{@colors.dim}#{@box.bottom_left}#{String.duplicate(@box.horizontal, 5)}#{@colors.reset}"
-        else
-          "#{padding} #{@box.bottom_left}#{String.duplicate(@box.horizontal, 5)}"
-        end
-
-      ([separator] ++ formatted_lines ++ [separator, closing])
-      |> Enum.join("\n")
+      Enum.join(formatted_lines, "\n")
     end
   end
 
