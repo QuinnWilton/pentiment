@@ -690,6 +690,67 @@ defmodule PentimentTest do
     end
   end
 
+  describe "single-file rendering golden" do
+    # Locks the exact rendering of a representative single-file diagnostic
+    # (bracket label, inline label inside the bracket, distant inline label
+    # with a gap marker, note, and help). Cross-file label support must not
+    # change a single byte of single-file output — this test is the proof.
+    test "renders byte-identical output for a representative diagnostic" do
+      lines = for i <- 1..20, do: "line #{String.pad_leading(Integer.to_string(i), 2)}"
+      content = Enum.join(lines, "\n")
+
+      report =
+        Report.error("Representative single-file diagnostic")
+        |> Report.with_code("E100")
+        |> Report.with_source("test.ex")
+        |> Report.with_label(Label.bracket(Span.position(3, 1, 6, 1), "block under scrutiny"))
+        |> Report.with_label(Label.secondary(Span.position(4, 3, 4, 8), "this guard"))
+        |> Report.with_label(Label.primary(Span.position(18, 1, 18, 5), "distant evidence"))
+        |> Report.with_note("a note about the block")
+        |> Report.with_help("a suggestion for the fix")
+
+      source = Source.from_string("test.ex", content)
+      result = Pentiment.format(report, source, colors: false)
+
+      # Built from a line list because the gap-marker line carries trailing
+      # bracket-column spacing that a heredoc would invite editors to strip.
+      expected =
+        Enum.join(
+          [
+            "error[E100]: Representative single-file diagnostic",
+            "   ╭─[test.ex:3:1]",
+            "   │",
+            " 1 │   line  1",
+            " 2 │   line  2",
+            " 3 │ │ line  3",
+            " 4 │ │ line  4",
+            "   •     ──┬──",
+            "   •       ╰── this guard",
+            " 5 │ │ line  5",
+            " 6 │ │ line  6",
+            "   • ╰── block under scrutiny",
+            " 7 │   line  7",
+            " 8 │   line  8",
+            "   ⋮  ",
+            "16 │   line 16",
+            "17 │   line 17",
+            "18 │   line 18",
+            "   •   ─┬──",
+            "   •    ╰── distant evidence",
+            "19 │   line 19",
+            "20 │   line 20",
+            "   │",
+            "   ╰─────",
+            "     note: a note about the block",
+            "     help: a suggestion for the fix"
+          ],
+          "\n"
+        )
+
+      assert result == expected
+    end
+  end
+
   describe "format_compact/1 edge cases" do
     test "handles report without labels" do
       report =
