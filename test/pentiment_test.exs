@@ -690,6 +690,236 @@ defmodule PentimentTest do
     end
   end
 
+  describe "cross-file labels" do
+    defp cross_file_report do
+      Report.error("Cross-file finding")
+      |> Report.with_code("X1")
+      |> Report.with_source("a.ex")
+      |> Report.with_label(Label.bracket(Span.position(2, 1, 2, 1), "primary here"))
+      |> Report.with_label(
+        Label.new(Span.position(4, 1, 4, 1),
+          message: "related here",
+          priority: :secondary,
+          style: :bracket,
+          source: "b.ex"
+        )
+      )
+      |> Report.with_note("a note")
+      |> Report.with_help("a suggestion")
+    end
+
+    defp cross_file_sources do
+      %{
+        "a.ex" => Source.from_string("a.ex", Enum.join(["a1", "a2", "a3", "a4", "a5"], "\n")),
+        "b.ex" => Source.from_string("b.ex", Enum.join(["b1", "b2", "b3", "b4", "b5"], "\n"))
+      }
+    end
+
+    test "renders a cross-file bracket label as a continuation frame" do
+      result = Pentiment.format(cross_file_report(), cross_file_sources(), colors: false)
+
+      expected =
+        Enum.join(
+          [
+            "error[X1]: Cross-file finding",
+            "  ╭─[a.ex:2:1]",
+            "  │",
+            "1 │   a1",
+            "2 │ │ a2",
+            "  • ╰── primary here",
+            "3 │   a3",
+            "4 │   a4",
+            "  │",
+            "  ├─[b.ex:4:1]",
+            "  │",
+            "2 │   b2",
+            "3 │   b3",
+            "4 │ │ b4",
+            "  • ╰── related here",
+            "5 │   b5",
+            "  │",
+            "  ╰─────",
+            "    note: a note",
+            "    help: a suggestion"
+          ],
+          "\n"
+        )
+
+      assert result == expected
+    end
+
+    test "renders a header-only continuation when the label's source is missing" do
+      sources = Map.delete(cross_file_sources(), "b.ex")
+      result = Pentiment.format(cross_file_report(), sources, colors: false)
+
+      expected =
+        Enum.join(
+          [
+            "error[X1]: Cross-file finding",
+            "  ╭─[a.ex:2:1]",
+            "  │",
+            "1 │   a1",
+            "2 │ │ a2",
+            "  • ╰── primary here",
+            "3 │   a3",
+            "4 │   a4",
+            "  │",
+            "  ├─[b.ex:4:1]",
+            "  ╰─────",
+            "    note: a note",
+            "    help: a suggestion"
+          ],
+          "\n"
+        )
+
+      assert result == expected
+    end
+
+    test "mixes same-file and cross-file labels in one frame" do
+      report =
+        Report.error("Mixed")
+        |> Report.with_source("a.ex")
+        |> Report.with_label(Label.bracket(Span.position(1, 1, 2, 1), "block"))
+        |> Report.with_label(Label.secondary(Span.position(4, 1, 4, 3), "inline evidence"))
+        |> Report.with_label(
+          Label.new(Span.position(3, 1, 3, 1),
+            message: "foreign evidence",
+            priority: :secondary,
+            style: :bracket,
+            source: "b.ex"
+          )
+        )
+
+      result = Pentiment.format(report, cross_file_sources(), colors: false)
+
+      # Both a.ex labels render in the lead section, before the single
+      # continuation header; the b.ex label renders after it.
+      assert count_occurrences(result, "├─[") == 1
+      {continuation_at, _} = :binary.match(result, "├─[b.ex:3:1]")
+      {block_at, _} = :binary.match(result, "block")
+      {inline_at, _} = :binary.match(result, "inline evidence")
+      {foreign_at, _} = :binary.match(result, "foreign evidence")
+
+      assert block_at < continuation_at
+      assert inline_at < continuation_at
+      assert foreign_at > continuation_at
+    end
+
+    test "explicit label source equal to the report source behaves as nil" do
+      explicit =
+        Report.error("Same file")
+        |> Report.with_source("a.ex")
+        |> Report.with_label(
+          Label.new(Span.position(2, 1, 2, 3), message: "here", source: "a.ex")
+        )
+
+      implicit =
+        Report.error("Same file")
+        |> Report.with_source("a.ex")
+        |> Report.with_label(Label.new(Span.position(2, 1, 2, 3), message: "here"))
+
+      sources = cross_file_sources()
+
+      assert Pentiment.format(explicit, sources, colors: false) ==
+               Pentiment.format(implicit, sources, colors: false)
+
+      refute Pentiment.format(explicit, sources, colors: false) =~ "├─"
+    end
+
+    test "leads with the label's file when no label targets the report source" do
+      report =
+        Report.error("All evidence elsewhere")
+        |> Report.with_source("a.ex")
+        |> Report.with_label(Label.primary(Span.position(2, 1), "here", source: "b.ex"))
+
+      result = Pentiment.format(report, cross_file_sources(), colors: false)
+
+      assert result =~ "╭─[b.ex:2:1]"
+      assert result =~ "b2"
+      refute result =~ "├─"
+    end
+
+    test "groups multiple labels in the same foreign file under one continuation" do
+      report =
+        Report.error("Two foreign labels")
+        |> Report.with_source("a.ex")
+        |> Report.with_label(Label.primary(Span.position(1, 1, 1, 3), "root"))
+        |> Report.with_label(Label.secondary(Span.position(2, 1, 2, 3), "first", source: "b.ex"))
+        |> Report.with_label(Label.secondary(Span.position(4, 1, 4, 3), "second", source: "b.ex"))
+
+      result = Pentiment.format(report, cross_file_sources(), colors: false)
+
+      assert count_occurrences(result, "├─[") == 1
+      assert result =~ "├─[b.ex:2:1]"
+      assert result =~ "first"
+      assert result =~ "second"
+    end
+
+    test "degrades non-matching groups to header-only when given a single Source" do
+      source = Source.from_string("a.ex", "a1\na2\na3")
+
+      report =
+        Report.error("Single source struct")
+        |> Report.with_source("a.ex")
+        |> Report.with_label(Label.primary(Span.position(2, 1, 2, 3), "matched"))
+        |> Report.with_label(
+          Label.secondary(Span.position(3, 1, 3, 3), "unmatched", source: "b.ex")
+        )
+
+      result = Pentiment.format(report, source, colors: false)
+
+      assert result =~ "a2"
+      assert result =~ "matched"
+      assert result =~ "├─[b.ex:3:1]"
+      refute result =~ "unmatched"
+    end
+
+    test "resolves deferred spans against each group's own source" do
+      sources = %{
+        "a.ex" => Source.from_string("a.ex", "x target y"),
+        "b.ex" => Source.from_string("b.ex", "z needle w")
+      }
+
+      report =
+        Report.error("Deferred spans")
+        |> Report.with_source("a.ex")
+        |> Report.with_label(Label.primary(Span.search(line: 1, pattern: "target"), "found a"))
+        |> Report.with_label(Label.secondary(Span.byte(2, 6), "found b", source: "b.ex"))
+
+      result = Pentiment.format(report, sources, colors: false)
+
+      # Both spans resolve to column 3 — but each against its own file.
+      assert result =~ "╭─[a.ex:1:3]"
+      assert result =~ "├─[b.ex:1:3]"
+      assert result =~ "found a"
+      assert result =~ "found b"
+    end
+
+    test "leads with the line fallback when the report has no source" do
+      report =
+        Report.error("No report source")
+        |> Report.with_label(Label.primary(Span.position(1, 1), "anchored nowhere"))
+        |> Report.with_label(
+          Label.secondary(Span.position(2, 1, 2, 3), "elsewhere", source: "b.ex")
+        )
+
+      result = Pentiment.format(report, cross_file_sources(), colors: false)
+
+      assert result =~ "╭─[line 1:1]"
+      assert result =~ "├─[b.ex:2:1]"
+      assert result =~ "elsewhere"
+    end
+
+    test "format_compact/1 uses the first label's own source" do
+      report =
+        Report.error("boom")
+        |> Report.with_source("a.ex")
+        |> Report.with_label(Label.primary(Span.position(3, 1), "here", source: "b.ex"))
+
+      assert Pentiment.format_compact(report) == "boom (b.ex:3:1)"
+    end
+  end
+
   describe "single-file rendering golden" do
     # Locks the exact rendering of a representative single-file diagnostic
     # (bracket label, inline label inside the bracket, distant inline label
@@ -863,5 +1093,9 @@ defmodule PentimentTest do
         end
       end
     end
+  end
+
+  defp count_occurrences(string, pattern) do
+    string |> String.split(pattern) |> length() |> Kernel.-(1)
   end
 end
