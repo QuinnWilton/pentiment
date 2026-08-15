@@ -64,7 +64,9 @@ defmodule Pentiment do
   @type format_options :: [
           colors: boolean(),
           context_lines: non_neg_integer(),
-          formatter: module()
+          formatter: module(),
+          syntax: :auto | boolean(),
+          highlighter: module()
         ]
 
   @doc """
@@ -91,6 +93,14 @@ defmodule Pentiment do
   - `:colors` - Whether to use ANSI colors (default: true)
   - `:context_lines` - Lines of context around labels (default: 2)
   - `:formatter` - Formatter module (default: `Pentiment.Formatter.Renderer`)
+  - `:syntax` - Whether to syntax-highlight source context lines (default:
+    `:auto`: highlight when colors are active, a highlighter is available,
+    and the source's language is known; `false` disables). Strictly
+    subordinate to `:colors` — `colors: false` always yields plain text.
+    Highlighting requires the optional makeup lexers; see
+    `Pentiment.Highlighter.Makeup`.
+  - `:highlighter` - Module implementing `Pentiment.Highlighter`
+    (default: `Pentiment.Highlighter.Makeup`)
 
   ## Examples
 

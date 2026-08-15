@@ -35,12 +35,15 @@ defmodule Pentiment.Formatter.Renderer do
 
   @type format_options :: [
           colors: boolean(),
-          context_lines: non_neg_integer()
+          context_lines: non_neg_integer(),
+          syntax: :auto | boolean(),
+          highlighter: module()
         ]
 
   @default_options [
     colors: true,
-    context_lines: 2
+    context_lines: 2,
+    syntax: :auto
   ]
 
   # ANSI color codes.
@@ -78,6 +81,13 @@ defmodule Pentiment.Formatter.Renderer do
 
   - `:colors` - Whether to use ANSI colors (default: true, respects IO.ANSI.enabled?())
   - `:context_lines` - Number of lines of context around labels (default: 2)
+  - `:syntax` - Whether to syntax-highlight source context lines (default:
+    `:auto`). `:auto` highlights when colors are active, a highlighter is
+    available, and the source's language is known; `false` disables.
+    Highlighting is strictly subordinate to `:colors` — `colors: false`
+    always yields plain text.
+  - `:highlighter` - Module implementing `Pentiment.Highlighter`
+    (default: `Pentiment.Highlighter.Makeup`)
 
   ## Sources
 
@@ -93,22 +103,27 @@ defmodule Pentiment.Formatter.Renderer do
     context_lines = Keyword.get(opts, :context_lines, 2)
 
     report_source = Diagnostic.source(diagnostic)
+    highlighter = active_highlighter(opts, use_colors)
 
     # Group labels by their effective source (label source, falling back to
     # the report's source), then resolve each group's source and deferred
-    # spans (Search, Byte) against that group's own file.
+    # spans (Search, Byte) against that group's own file. Each group also
+    # carries its highlight line map (nil when highlighting is inactive),
+    # computed here so every source is lexed at most once per format call.
     groups =
       diagnostic
       |> Diagnostic.labels()
       |> group_labels_by_source(report_source)
       |> Enum.map(fn {name, labels} ->
         source = resolve_source(name, sources)
-        {name, source, resolve_deferred_spans(labels, source)}
+
+        {name, source, resolve_deferred_spans(labels, source),
+         highlight_source(source, highlighter)}
       end)
 
     # Line number width is global across all groups so the frame, notes, and
     # help all share one gutter alignment.
-    all_labels = Enum.flat_map(groups, fn {_name, _source, labels} -> labels end)
+    all_labels = Enum.flat_map(groups, fn {_name, _source, labels, _highlights} -> labels end)
     line_num_width = calculate_line_num_width(all_labels, context_lines)
 
     [
@@ -160,6 +175,37 @@ defmodule Pentiment.Formatter.Renderer do
   end
 
   defp resolve_source(_source_name, _sources), do: nil
+
+  # ============================================================================
+  # Syntax Highlighting
+  # ============================================================================
+
+  # Picks the highlighter module for this format call, or nil when
+  # highlighting is inactive. `syntax: :auto` (the default) highlights only
+  # when the colors gate is already open — `colors: false` remains the
+  # single plain-text switch, and no additional TTY probing happens here.
+  # `syntax: false` disables highlighting outright (`true` behaves as
+  # `:auto`).
+  defp active_highlighter(opts, use_colors) do
+    cond do
+      not use_colors -> nil
+      Keyword.get(opts, :syntax, :auto) == false -> nil
+      true -> Keyword.get(opts, :highlighter, Pentiment.Highlighter.Makeup)
+    end
+  end
+
+  # Lexes a source into a per-line segment map, or nil when highlighting
+  # does not apply: no highlighter active, no content to lex, unknown
+  # language, or the highlighter declined.
+  defp highlight_source(%Source{content: content, language: language}, highlighter)
+       when is_binary(content) and not is_nil(language) and not is_nil(highlighter) do
+    case highlighter.highlight(content, language) do
+      {:ok, line_map} -> line_map
+      :error -> nil
+    end
+  end
+
+  defp highlight_source(_source, _highlighter), do: nil
 
   # ============================================================================
   # Deferred Span Resolution
@@ -248,7 +294,7 @@ defmodule Pentiment.Formatter.Renderer do
     sections =
       groups
       |> Enum.with_index()
-      |> Enum.map(fn {{name, source, labels}, index} ->
+      |> Enum.map(fn {{name, source, labels, highlights}, index} ->
         style = if index == 0, do: :open, else: :continue
 
         # The lead group keeps the historical header semantics (file name from
@@ -262,7 +308,17 @@ defmodule Pentiment.Formatter.Renderer do
           end
 
         header = format_frame_header(style, display_name, labels, line_num_width, use_colors)
-        body = format_source_context(labels, source, context_lines, line_num_width, use_colors)
+
+        body =
+          format_source_context(
+            labels,
+            source,
+            context_lines,
+            line_num_width,
+            use_colors,
+            highlights
+          )
+
         {header, body}
       end)
 
@@ -352,10 +408,20 @@ defmodule Pentiment.Formatter.Renderer do
   # Source Context Formatting
   # ============================================================================
 
-  defp format_source_context([], _source, _context_lines, _line_num_width, _use_colors), do: nil
-  defp format_source_context(_labels, nil, _context_lines, _line_num_width, _use_colors), do: nil
+  defp format_source_context([], _source, _context_lines, _line_num_width, _use_colors, _hl),
+    do: nil
 
-  defp format_source_context(labels, source, context_lines, line_num_width, use_colors) do
+  defp format_source_context(_labels, nil, _context_lines, _line_num_width, _use_colors, _hl),
+    do: nil
+
+  defp format_source_context(
+         labels,
+         source,
+         context_lines,
+         line_num_width,
+         use_colors,
+         highlights
+       ) do
     # Only handle Position spans for now.
     position_labels =
       labels
@@ -374,12 +440,20 @@ defmodule Pentiment.Formatter.Renderer do
         source,
         context_lines,
         line_num_width,
-        use_colors
+        use_colors,
+        highlights
       )
     end
   end
 
-  defp format_multi_span_context(labels, source, context_lines, line_num_width, use_colors) do
+  defp format_multi_span_context(
+         labels,
+         source,
+         context_lines,
+         line_num_width,
+         use_colors,
+         highlights
+       ) do
     # Sort labels by line number.
     sorted_labels =
       labels
@@ -459,7 +533,8 @@ defmodule Pentiment.Formatter.Renderer do
                           source_line,
                           line_num_width,
                           bracket_prefix,
-                          use_colors
+                          use_colors,
+                          highlights
                         )
                       ]
 
@@ -471,7 +546,8 @@ defmodule Pentiment.Formatter.Renderer do
                         line_num_width,
                         bracket_prefix,
                         bracket_col_count,
-                        use_colors
+                        use_colors,
+                        highlights
                       )
                   end
               end
@@ -651,10 +727,17 @@ defmodule Pentiment.Formatter.Renderer do
     end
   end
 
-  defp format_context_line(line_num, source_line, line_num_width, bracket_prefix, use_colors) do
+  defp format_context_line(
+         line_num,
+         source_line,
+         line_num_width,
+         bracket_prefix,
+         use_colors,
+         highlights
+       ) do
     line_str = String.pad_leading(Integer.to_string(line_num), line_num_width)
     prefix_width = line_num_width + 3
-    truncated_line = truncate_source_line(source_line, prefix_width)
+    truncated_line = render_source_text(source_line, prefix_width, highlights, line_num)
 
     if use_colors do
       "#{@colors.dim}#{line_str} #{@box.vertical}#{@colors.reset} #{bracket_prefix}#{truncated_line}"
@@ -670,12 +753,13 @@ defmodule Pentiment.Formatter.Renderer do
          line_num_width,
          bracket_prefix,
          bracket_col_count,
-         use_colors
+         use_colors,
+         highlights
        ) do
     padding = String.duplicate(" ", line_num_width)
     line_str = String.pad_leading(Integer.to_string(line_num), line_num_width)
     prefix_width = line_num_width + 3
-    truncated_line = truncate_source_line(source_line, prefix_width)
+    truncated_line = render_source_text(source_line, prefix_width, highlights, line_num)
 
     source =
       if use_colors do
@@ -1123,8 +1207,79 @@ defmodule Pentiment.Formatter.Renderer do
   defp priority_color(:primary), do: @colors.error
   defp priority_color(:secondary), do: @colors.warning
 
+  # Renders the visible portion of a source line, syntax-highlighted when a
+  # highlight map is active and covers this line. The plain path (highlights
+  # nil — always the case when colors are off) is byte-identical to
+  # truncate_source_line/2. Stripping the ANSI escapes from the styled path
+  # yields the plain path's exact output: the visible prefix is computed from
+  # the raw line with the same length/slice calls, and styles are mapped onto
+  # it afterwards.
+  defp render_source_text(source_line, prefix_width, nil, _line_num) do
+    truncate_source_line(source_line, prefix_width)
+  end
+
+  defp render_source_text(source_line, prefix_width, highlights, line_num) do
+    case Map.get(highlights, line_num) do
+      nil ->
+        truncate_source_line(source_line, prefix_width)
+
+      segments ->
+        if segments_text(segments) == source_line do
+          styled_source_text(segments, source_line, max_content_width(prefix_width))
+        else
+          # The highlighter's segments disagree with the raw line; never
+          # risk changing visible characters or pointer alignment.
+          truncate_source_line(source_line, prefix_width)
+        end
+    end
+  end
+
+  defp segments_text(segments) do
+    Enum.map_join(segments, fn {_style, text} -> text end)
+  end
+
+  defp styled_source_text(segments, source_line, max_width) do
+    if String.length(source_line) > max_width do
+      visible = String.slice(source_line, 0, max_width - 1)
+
+      segments
+      |> take_segment_bytes(byte_size(visible), [])
+      |> render_segments()
+      |> Kernel.<>("…")
+    else
+      render_segments(segments)
+    end
+  end
+
+  # Takes segments up to a byte budget, splitting the boundary segment. The
+  # budget is the byte size of a String.slice prefix of the concatenated
+  # segment texts (verified equal to the raw line), so the binary_part split
+  # lands on a codepoint boundary and yields valid UTF-8.
+  defp take_segment_bytes(_segments, 0, acc), do: Enum.reverse(acc)
+  defp take_segment_bytes([], _budget, acc), do: Enum.reverse(acc)
+
+  defp take_segment_bytes([{style, text} | rest], budget, acc) do
+    size = byte_size(text)
+
+    if size <= budget do
+      take_segment_bytes(rest, budget - size, [{style, text} | acc])
+    else
+      Enum.reverse([{style, binary_part(text, 0, budget)} | acc])
+    end
+  end
+
+  # Every styled segment closes itself with a reset, so no style is ever
+  # active at end of line or bleeding into pointer rows; the truncation
+  # ellipsis stays unstyled.
+  defp render_segments(segments) do
+    Enum.map_join(segments, fn
+      {nil, text} -> text
+      {style, text} -> style <> text <> @colors.reset
+    end)
+  end
+
   defp truncate_source_line(line, prefix_width) do
-    max_content_width = max(@max_source_width - prefix_width, 20)
+    max_content_width = max_content_width(prefix_width)
 
     if String.length(line) > max_content_width do
       String.slice(line, 0, max_content_width - 1) <> "…"
@@ -1132,6 +1287,8 @@ defmodule Pentiment.Formatter.Renderer do
       line
     end
   end
+
+  defp max_content_width(prefix_width), do: max(@max_source_width - prefix_width, 20)
 
   defp bold_backtick_content(text, false), do: text
 
