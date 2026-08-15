@@ -2,6 +2,34 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+### Added
+
+- Syntax highlighting of source context lines, powered by the optional
+  makeup lexers: consumers add `{:makeup_elixir, "~> 1.0"}` and/or
+  `{:makeup_erlang, "~> 1.0"}` to their own deps to enable it; without
+  them, diagnostics render unhighlighted. The palette is restrained
+  (comments dim, literals in subtle colors, never red/yellow) so label
+  pointers stay visually dominant.
+- `:syntax` format option (default `:auto`: highlight when colors are
+  active, a highlighter is available, and the source's language is known;
+  `false` disables).
+- `:highlighter` format option and the `Pentiment.Highlighter` behaviour
+  for custom highlighters (default: `Pentiment.Highlighter.Makeup`).
+- `Pentiment.Source` `:language` field (`:elixir | :erlang | nil`),
+  inferred from the source name's extension by the constructors, with a
+  `:language` option to override.
+
+### Compatibility
+
+- `colors: false` output is byte-identical to 0.2.0; the existing golden
+  tests pin this. Highlighting is strictly subordinate to the existing
+  colors gate — `colors: false` remains the single plain-text switch.
+- Stripping ANSI escapes from highlighted output yields the plain output
+  exactly (golden + property tested), so highlighting can never change
+  visible characters or pointer alignment.
+
 ## 0.2.0
 
 ### Added
