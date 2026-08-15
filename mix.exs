@@ -34,11 +34,19 @@ defmodule Pentiment.MixProject do
 
   defp deps do
     [
+      # Optional lexers for syntax highlighting: consumers that want
+      # highlighted diagnostics add these to their own deps; without
+      # them, diagnostics render unhighlighted.
+      {:makeup, "~> 1.2", optional: true},
+      {:makeup_elixir, "~> 1.0", optional: true},
+      {:makeup_erlang, "~> 1.0", optional: true},
       {:stream_data, "~> 1.0", only: [:dev, :test]},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.30", only: :dev, runtime: false},
-      # nimble_parsec is used by ex_doc's deps in dev, and our parser example in test.
-      {:nimble_parsec, "~> 1.0", only: [:dev, :test], optional: true},
+      # nimble_parsec backs the optional makeup lexers, ex_doc's deps in
+      # dev, and our parser example in test. It cannot be :only-restricted
+      # because makeup requires it in every environment.
+      {:nimble_parsec, "~> 1.0", optional: true},
       {:yamerl, "~> 0.10", only: :test, optional: true}
     ]
   end

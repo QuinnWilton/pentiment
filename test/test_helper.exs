@@ -17,3 +17,8 @@ if Code.ensure_loaded?(:yamerl) do
 else
   ExUnit.configure(exclude: [:requires_yamerl])
 end
+
+# Syntax highlighting tests need the optional makeup lexers.
+unless Code.ensure_loaded?(Makeup) do
+  ExUnit.configure(exclude: [:requires_makeup])
+end
