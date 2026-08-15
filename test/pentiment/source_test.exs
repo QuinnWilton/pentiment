@@ -37,6 +37,49 @@ defmodule Pentiment.SourceTest do
     end
   end
 
+  describe "language inference" do
+    test "infers :elixir from .ex and .exs extensions" do
+      assert %Source{language: :elixir} = Source.from_string("lib/app.ex", "code")
+      assert %Source{language: :elixir} = Source.from_string("test/app_test.exs", "code")
+    end
+
+    test "infers :erlang from .erl and .hrl extensions" do
+      assert %Source{language: :erlang} = Source.from_string("src/app.erl", "code")
+      assert %Source{language: :erlang} = Source.from_string("include/app.hrl", "code")
+    end
+
+    test "leaves language nil for non-path names" do
+      assert %Source{language: nil} = Source.from_string("<stdin>", "code")
+      assert %Source{language: nil} = Source.from_string("test", "code")
+    end
+
+    test "leaves language nil for unrecognized extensions" do
+      assert %Source{language: nil} = Source.from_string("config.yaml", "key: value")
+      assert %Source{language: nil} = Source.from_string("notes.txt", "text")
+    end
+
+    test "explicit language option overrides inference" do
+      assert %Source{language: :elixir} =
+               Source.from_string("weird.txt", "code", language: :elixir)
+
+      assert %Source{language: nil} = Source.from_string("lib/app.ex", "code", language: nil)
+    end
+
+    @tag :tmp_dir
+    test "from_file infers language from the path", %{tmp_dir: tmp_dir} do
+      path = Path.join(tmp_dir, "test.ex")
+      File.write!(path, "defmodule Test do\nend")
+
+      assert %Source{language: :elixir} = Source.from_file(path)
+      assert %Source{language: :erlang} = Source.from_file(path, language: :erlang)
+    end
+
+    test "named/1 infers language from the name" do
+      assert %Source{language: :elixir, content: nil} = Source.named("lib/app.ex")
+      assert %Source{language: nil, content: nil} = Source.named("<stdin>")
+    end
+  end
+
   describe "named/1" do
     test "creates source with just a name" do
       source = Source.named("lib/app.ex")

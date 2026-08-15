@@ -36,34 +36,50 @@ defmodule Pentiment.Source do
   `content/1` to get the raw string content.
   """
 
+  @typedoc """
+  The language of the source content, used for syntax highlighting.
+
+  Inferred from the source name's extension by the constructors, or set
+  explicitly via the `:language` option. `nil` means unknown; unknown
+  sources are never highlighted.
+  """
+  @type language :: :elixir | :erlang | nil
+
   @type t :: %__MODULE__{
           name: String.t(),
           content: String.t() | nil,
-          lines: [String.t()] | nil
+          lines: [String.t()] | nil,
+          language: language()
         }
 
+  @type source_option :: {:language, language()}
+
   @enforce_keys [:name]
-  defstruct [:name, :content, :lines]
+  defstruct [:name, :content, :lines, :language]
 
   @doc """
   Creates a source from a file path.
 
   Reads the file content immediately. Raises if the file cannot be read.
 
+  The language is inferred from the path's extension (`.ex`/`.exs` are
+  Elixir, `.erl`/`.hrl` are Erlang); pass `language:` to override.
+
   ## Examples
 
       iex> source = Pentiment.Source.from_file("lib/my_app.ex")
-      %Pentiment.Source{name: "lib/my_app.ex", content: "..."}
+      %Pentiment.Source{name: "lib/my_app.ex", content: "...", language: :elixir}
   """
-  @spec from_file(Path.t()) :: t()
-  def from_file(path) when is_binary(path) do
+  @spec from_file(Path.t(), [source_option()]) :: t()
+  def from_file(path, opts \\ []) when is_binary(path) and is_list(opts) do
     content = File.read!(path)
     lines = String.split(content, "\n")
 
     %__MODULE__{
       name: path,
       content: content,
-      lines: lines
+      lines: lines,
+      language: Keyword.get(opts, :language, infer_language(path))
     }
   end
 
@@ -72,19 +88,25 @@ defmodule Pentiment.Source do
 
   Use this for content that isn't on disk, like user input or generated code.
 
+  The language is inferred from the name's extension (`.ex`/`.exs` are
+  Elixir, `.erl`/`.hrl` are Erlang); names without a recognized extension
+  (like `"<stdin>"`) get `nil`. Pass `language:` to override.
+
   ## Examples
 
       iex> source = Pentiment.Source.from_string("<stdin>", "x = 1 + 2")
-      %Pentiment.Source{name: "<stdin>", content: "x = 1 + 2"}
+      %Pentiment.Source{name: "<stdin>", content: "x = 1 + 2", language: nil}
   """
-  @spec from_string(String.t(), String.t()) :: t()
-  def from_string(name, content) when is_binary(name) and is_binary(content) do
+  @spec from_string(String.t(), String.t(), [source_option()]) :: t()
+  def from_string(name, content, opts \\ [])
+      when is_binary(name) and is_binary(content) and is_list(opts) do
     lines = String.split(content, "\n")
 
     %__MODULE__{
       name: name,
       content: content,
-      lines: lines
+      lines: lines,
+      language: Keyword.get(opts, :language, infer_language(name))
     }
   end
 
@@ -95,14 +117,28 @@ defmodule Pentiment.Source do
   This is useful when you want to defer file reads or when the content
   comes from an external source.
 
+  The language is inferred from the name's extension so it stays
+  consistent with the other constructors, but a named source has no
+  content and is therefore never highlighted.
+
   ## Examples
 
       iex> source = Pentiment.Source.named("lib/app.ex")
-      %Pentiment.Source{name: "lib/app.ex", content: nil}
+      %Pentiment.Source{name: "lib/app.ex", content: nil, language: :elixir}
   """
   @spec named(String.t()) :: t()
   def named(name) when is_binary(name) do
-    %__MODULE__{name: name, content: nil, lines: nil}
+    %__MODULE__{name: name, content: nil, lines: nil, language: infer_language(name)}
+  end
+
+  # Infers the language from the name's extension. Names that are not
+  # paths ("<stdin>", "test") have no recognized extension and get nil.
+  defp infer_language(name) do
+    case Path.extname(name) do
+      ext when ext in [".ex", ".exs"] -> :elixir
+      ext when ext in [".erl", ".hrl"] -> :erlang
+      _ -> nil
+    end
   end
 
   @doc """
