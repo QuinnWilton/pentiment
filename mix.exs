@@ -1,14 +1,14 @@
 defmodule Pentiment.MixProject do
   use Mix.Project
 
-  @version "0.2.0"
+  @version "0.2.1"
   @source_url "https://github.com/QuinnWilton/pentiment"
 
   def project do
     [
       app: :pentiment,
       version: @version,
-      elixir: "~> 1.19",
+      elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       docs: docs(),
