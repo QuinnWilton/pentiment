@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## 0.2.0
 
 ### Added
 
@@ -20,20 +20,6 @@ All notable changes to this project are documented in this file.
 - `Pentiment.Source` `:language` field (`:elixir | :erlang | nil`),
   inferred from the source name's extension by the constructors, with a
   `:language` option to override.
-
-### Compatibility
-
-- `colors: false` output is byte-identical to 0.2.0; the existing golden
-  tests pin this. Highlighting is strictly subordinate to the existing
-  colors gate — `colors: false` remains the single plain-text switch.
-- Stripping ANSI escapes from highlighted output yields the plain output
-  exactly (golden + property tested), so highlighting can never change
-  visible characters or pointer alignment.
-
-## 0.2.0
-
-### Added
-
 - Cross-file label rendering. Labels with `:source` set now render as
   continuation frames (`├─[file:line:col]`) against their own file, inside
   the same diagnostic frame: the report's own file opens with `╭─[...]`,
@@ -53,6 +39,12 @@ All notable changes to this project are documented in this file.
 
 ### Compatibility
 
+- Highlighting never reaches `colors: false` output; the existing golden
+  tests pin this. It is strictly subordinate to the colors gate —
+  `colors: false` remains the single plain-text switch.
+- Stripping ANSI escapes from highlighted output yields the plain output
+  exactly (golden + property tested), so highlighting can never change
+  visible characters or pointer alignment.
 - Diagnostics whose labels set no `:source` (or set it equal to the
   report's source) render byte-identically to 0.1.5; a golden test pins
   this.
