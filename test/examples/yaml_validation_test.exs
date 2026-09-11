@@ -1,5 +1,6 @@
 defmodule Pentiment.Examples.YamlValidationTest do
   use ExUnit.Case, async: true
+  alias Pentiment.Examples.YamlValidation
 
   @moduletag :requires_yamerl
 
@@ -16,7 +17,7 @@ defmodule Pentiment.Examples.YamlValidationTest do
           LOG_LEVEL: debug
       """
 
-      assert {:ok, data} = Pentiment.Examples.YamlValidation.validate_string("test.yml", yaml)
+      assert {:ok, data} = YamlValidation.validate_string("test.yml", yaml)
       assert get_in(data, ["service", "name"]) == "my-app"
       assert get_in(data, ["service", "replicas"]) == 3
     end
@@ -28,7 +29,7 @@ defmodule Pentiment.Examples.YamlValidationTest do
         replicas: "three"
       """
 
-      {:error, formatted} = Pentiment.Examples.YamlValidation.validate_string("test.yml", yaml)
+      {:error, formatted} = YamlValidation.validate_string("test.yml", yaml)
 
       assert formatted =~ "Field `replicas` has wrong type"
       assert formatted =~ "SCHEMA001"
@@ -45,7 +46,7 @@ defmodule Pentiment.Examples.YamlValidationTest do
           LOG_LEVEL: debug
       """
 
-      {:error, formatted} = Pentiment.Examples.YamlValidation.validate_string("test.yml", yaml)
+      {:error, formatted} = YamlValidation.validate_string("test.yml", yaml)
 
       assert formatted =~ "Unknown field `environmnet`"
       assert formatted =~ "SCHEMA002"
@@ -62,7 +63,7 @@ defmodule Pentiment.Examples.YamlValidationTest do
           LOG_LEVEL: debug
       """
 
-      {:error, formatted} = Pentiment.Examples.YamlValidation.validate_string("test.yml", yaml)
+      {:error, formatted} = YamlValidation.validate_string("test.yml", yaml)
 
       # Should have multiple errors.
       assert formatted =~ "replicas"

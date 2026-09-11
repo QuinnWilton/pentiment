@@ -45,8 +45,7 @@ defmodule Pentiment.Formatter.Compact do
   @spec format_all([Diagnostic.t()]) :: String.t()
   def format_all(diagnostics) when is_list(diagnostics) do
     diagnostics
-    |> Enum.map(&format/1)
-    |> Enum.join("\n")
+    |> Enum.map_join("\n", &format/1)
   end
 
   defp format_location([], _source), do: nil

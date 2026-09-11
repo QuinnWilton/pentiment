@@ -50,8 +50,8 @@ defmodule Pentiment.HighlightTest do
   use ExUnit.Case, async: false
   use ExUnitProperties
 
-  alias Pentiment.{Label, Report, Source, Span}
   alias Pentiment.HighlightTest.{CyanLineHighlighter, FailingHighlighter, MisalignedHighlighter}
+  alias Pentiment.{Label, Report, Source, Span}
 
   setup do
     previous = Application.get_env(:elixir, :ansi_enabled)

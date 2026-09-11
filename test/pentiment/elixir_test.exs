@@ -303,7 +303,7 @@ defmodule Pentiment.ElixirTest do
 
     test "creates span for integer with correct length" do
       # 12345 is 5 characters
-      span = PentimentElixir.span_for_value(12345, 1, 1)
+      span = PentimentElixir.span_for_value(12_345, 1, 1)
 
       assert %Span.Position{
                start_line: 1,
@@ -349,7 +349,7 @@ defmodule Pentiment.ElixirTest do
       assert 1 == PentimentElixir.value_display_length(0)
       assert 1 == PentimentElixir.value_display_length(9)
       assert 2 == PentimentElixir.value_display_length(10)
-      assert 5 == PentimentElixir.value_display_length(12345)
+      assert 5 == PentimentElixir.value_display_length(12_345)
       assert 3 == PentimentElixir.value_display_length(-42)
     end
 

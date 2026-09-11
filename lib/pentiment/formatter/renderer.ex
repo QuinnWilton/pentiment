@@ -142,8 +142,7 @@ defmodule Pentiment.Formatter.Renderer do
   @spec format_all([Diagnostic.t()], Source.t() | map(), format_options()) :: String.t()
   def format_all(diagnostics, sources, opts \\ []) when is_list(diagnostics) do
     diagnostics
-    |> Enum.map(&format(&1, sources, opts))
-    |> Enum.join("\n\n")
+    |> Enum.map_join("\n\n", &format(&1, sources, opts))
     |> then(fn formatted ->
       count = length(diagnostics)
 
@@ -616,7 +615,7 @@ defmodule Pentiment.Formatter.Renderer do
     active_labels = Map.get(bracket_map, line_num, [])
 
     0..(bracket_col_count - 1)
-    |> Enum.map(fn col_idx ->
+    |> Enum.map_join("", fn col_idx ->
       case Enum.at(active_labels, col_idx) do
         nil ->
           "  "
@@ -630,7 +629,6 @@ defmodule Pentiment.Formatter.Renderer do
           end
       end
     end)
-    |> Enum.join()
   end
 
   # Emits closing lines for bracket labels whose end_line matches line_num.
@@ -656,26 +654,7 @@ defmodule Pentiment.Formatter.Renderer do
       active_labels = Map.get(bracket_map, line_num, [])
       closing_col_idx = Enum.find_index(active_labels, &(&1 == label)) || 0
 
-      # Prefix: bars for active brackets in columns before the closing one.
-      pre_prefix =
-        if closing_col_idx > 0 do
-          Enum.map_join(0..(closing_col_idx - 1)//1, fn col_idx ->
-            case Enum.at(active_labels, col_idx) do
-              nil ->
-                "  "
-
-              other_label ->
-                if use_colors do
-                  color = priority_color(other_label.priority)
-                  "#{color}#{@box.bracket_bar}#{@colors.reset} "
-                else
-                  "#{@box.bracket_bar} "
-                end
-            end
-          end)
-        else
-          ""
-        end
+      pre_prefix = bracket_bars(active_labels, closing_col_idx, use_colors)
 
       # Extend dashes through remaining bracket columns after the closing one.
       remaining_cols = bracket_col_count - closing_col_idx - 1
@@ -690,6 +669,25 @@ defmodule Pentiment.Formatter.Renderer do
       end
     end)
   end
+
+  # Bars for the active brackets in the columns before the closing one.
+  defp bracket_bars(_active_labels, 0, _use_colors), do: ""
+
+  defp bracket_bars(active_labels, closing_col_idx, use_colors) do
+    Enum.map_join(0..(closing_col_idx - 1)//1, fn col_idx ->
+      case Enum.at(active_labels, col_idx) do
+        nil -> "  "
+        other_label -> bracket_bar(other_label, use_colors)
+      end
+    end)
+  end
+
+  defp bracket_bar(label, true) do
+    color = priority_color(label.priority)
+    "#{color}#{@box.bracket_bar}#{@colors.reset} "
+  end
+
+  defp bracket_bar(_label, false), do: "#{@box.bracket_bar} "
 
   # Computes merged display ranges from a list of label line numbers.
   # Each label gets context_lines above and below. Overlapping or
@@ -922,7 +920,7 @@ defmodule Pentiment.Formatter.Renderer do
     # Build the underline character by character.
     chars =
       1..max_col
-      |> Enum.map(fn col ->
+      |> Enum.map_join("", fn col ->
         # Check if this column is a tee position.
         tee_geom = Enum.find(geometries, fn g -> g.tee_col == col end)
 
@@ -964,7 +962,6 @@ defmodule Pentiment.Formatter.Renderer do
             " "
         end
       end)
-      |> Enum.join()
 
     line =
       if use_colors do
@@ -986,7 +983,7 @@ defmodule Pentiment.Formatter.Renderer do
 
     chars =
       1..max_col
-      |> Enum.map(fn col ->
+      |> Enum.map_join("", fn col ->
         cond do
           col == geom.tee_col ->
             # This label's branch point.
@@ -1009,7 +1006,6 @@ defmodule Pentiment.Formatter.Renderer do
             " "
         end
       end)
-      |> Enum.join()
 
     # Add the horizontal line and message.
     branch_suffix =
@@ -1104,8 +1100,7 @@ defmodule Pentiment.Formatter.Renderer do
       nil
     else
       notes
-      |> Enum.map(fn note -> format_note(note, line_num_width, use_colors) end)
-      |> Enum.join("\n")
+      |> Enum.map_join("\n", fn note -> format_note(note, line_num_width, use_colors) end)
     end
   end
 
@@ -1127,8 +1122,7 @@ defmodule Pentiment.Formatter.Renderer do
       nil
     else
       help
-      |> Enum.map(fn h -> format_help_item(h, line_num_width, use_colors) end)
-      |> Enum.join("\n")
+      |> Enum.map_join("\n", fn h -> format_help_item(h, line_num_width, use_colors) end)
     end
   end
 

@@ -26,6 +26,8 @@ defmodule Pentiment.Span do
       Pentiment.Span.search(line: 5, pattern: "error")
   """
 
+  alias Pentiment.Span.Position
+
   @type t :: __MODULE__.Byte.t() | __MODULE__.Position.t() | __MODULE__.Search.t()
 
   # ============================================================================
@@ -81,17 +83,17 @@ defmodule Pentiment.Span do
         iex> Pentiment.Span.Byte.resolve(byte_span, source)
         %Pentiment.Span.Position{start_line: 1, start_column: 7, end_line: 1, end_column: 12}
     """
-    @spec resolve(t(), Pentiment.Source.t() | nil) :: Pentiment.Span.Position.t()
+    @spec resolve(t(), Pentiment.Source.t() | nil) :: Position.t()
     def resolve(%__MODULE__{}, nil) do
       # No source available, fall back to point span.
-      Pentiment.Span.Position.new(1, 1)
+      Position.new(1, 1)
     end
 
     def resolve(%__MODULE__{start: start, length: length}, source) do
       case Pentiment.Source.byte_to_position(source, start) do
         nil ->
           # Invalid start offset, fall back to point span.
-          Pentiment.Span.Position.new(1, 1)
+          Position.new(1, 1)
 
         {start_line, start_col} ->
           # Calculate end position (exclusive, so start + length).
@@ -100,10 +102,10 @@ defmodule Pentiment.Span do
           case Pentiment.Source.byte_to_position(source, end_offset) do
             nil ->
               # End offset is beyond content; use start as a point span.
-              Pentiment.Span.Position.new(start_line, start_col)
+              Position.new(start_line, start_col)
 
             {end_line, end_col} ->
-              Pentiment.Span.Position.new(start_line, start_col, end_line, end_col)
+              Position.new(start_line, start_col, end_line, end_col)
           end
       end
     end
@@ -173,11 +175,11 @@ defmodule Pentiment.Span do
     ## Examples
 
         # Full range
-        iex> Pentiment.Span.Position.new(5, 10, 5, 20)
+        iex> Position.new(5, 10, 5, 20)
         %Pentiment.Span.Position{start_line: 5, start_column: 10, end_line: 5, end_column: 20}
 
         # Single point
-        iex> Pentiment.Span.Position.new(5, 10)
+        iex> Position.new(5, 10)
         %Pentiment.Span.Position{start_line: 5, start_column: 10, end_line: nil, end_column: nil}
     """
     @spec new(pos_integer(), pos_integer(), pos_integer() | nil, pos_integer() | nil) :: t()
@@ -324,10 +326,10 @@ defmodule Pentiment.Span do
     spanning multiple lines. Returns a Position span covering the match,
     or a point span at `{line, after_column}` if not found.
     """
-    @spec resolve(t(), Pentiment.Source.t() | nil) :: Pentiment.Span.Position.t()
+    @spec resolve(t(), Pentiment.Source.t() | nil) :: Position.t()
     def resolve(%__MODULE__{} = search, nil) do
       # No source available, fall back to point span.
-      Pentiment.Span.Position.new(search.line, search.after_column)
+      Position.new(search.line, search.after_column)
     end
 
     def resolve(%__MODULE__{} = search, source) do
@@ -336,14 +338,14 @@ defmodule Pentiment.Span do
 
     defp search_lines(search, _source, _current_line, 0) do
       # Exhausted all lines, fall back to point span.
-      Pentiment.Span.Position.new(search.line, search.after_column)
+      Position.new(search.line, search.after_column)
     end
 
     defp search_lines(search, source, current_line, remaining_lines) do
       case Pentiment.Source.line(source, current_line) do
         nil ->
           # Line not found, fall back to point span.
-          Pentiment.Span.Position.new(search.line, search.after_column)
+          Position.new(search.line, search.after_column)
 
         source_line ->
           # On the first line, respect after_column; on subsequent lines, start from column 1.
@@ -361,7 +363,7 @@ defmodule Pentiment.Span do
               # Found - calculate actual column (1-indexed).
               start_col = search_start + pos + 1
               end_col = start_col + len
-              Pentiment.Span.Position.new(current_line, start_col, current_line, end_col)
+              Position.new(current_line, start_col, current_line, end_col)
 
             :nomatch ->
               # Not found on this line, try the next one.
