@@ -21,7 +21,7 @@ Beautiful, compiler-style diagnostic messages for Elixir.
 
 ```elixir
 def deps do
-  [{:pentiment, "~> 0.1.0"}]
+  [{:pentiment, "~> 0.2"}]
 end
 ```
 

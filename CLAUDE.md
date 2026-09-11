@@ -1,7 +1,5 @@
 # CLAUDE.md
 
-This project inherits all shared conventions from the top-level CLAUDE.md.
-
 ## Commit Message Style
 
 ```
