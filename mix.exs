@@ -1,16 +1,21 @@
 defmodule Pentiment.MixProject do
   use Mix.Project
 
+  @version "0.2.0"
+  @source_url "https://github.com/QuinnWilton/pentiment"
+
   def project do
     [
       app: :pentiment,
-      version: "0.2.0",
+      version: @version,
       elixir: "~> 1.19",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       docs: docs(),
       description: "Beautiful, compiler-style diagnostic messages for Elixir",
       package: package(),
+      source_url: @source_url,
+      homepage_url: @source_url,
       test_ignore_filters: [~r"/support/"],
       dialyzer: [
         plt_add_apps: [:mix, :ex_unit],
@@ -28,7 +33,8 @@ defmodule Pentiment.MixProject do
   defp package do
     [
       licenses: ["MIT"],
-      links: %{"GitHub" => "https://github.com/QuinnWilton/pentiment"}
+      links: %{"GitHub" => @source_url},
+      files: ~w(lib mix.exs README.md LICENSE CHANGELOG.md .formatter.exs)
     ]
   end
 
@@ -41,6 +47,7 @@ defmodule Pentiment.MixProject do
       {:makeup_elixir, "~> 1.0", optional: true},
       {:makeup_erlang, "~> 1.0", optional: true},
       {:stream_data, "~> 1.0", only: [:dev, :test]},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.30", only: :dev, runtime: false},
       # nimble_parsec backs the optional makeup lexers, ex_doc's deps in
@@ -54,9 +61,12 @@ defmodule Pentiment.MixProject do
   defp docs do
     [
       main: "readme",
+      source_ref: "v#{@version}",
+      source_url: @source_url,
       assets: %{"images" => "images"},
       extras: [
         "README.md",
+        "CHANGELOG.md",
         "guides/examples/overview.md",
         "guides/examples/config_validation.md",
         "guides/examples/state_machine.md",
